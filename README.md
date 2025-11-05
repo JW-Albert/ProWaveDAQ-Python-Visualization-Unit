@@ -44,15 +44,31 @@ ProWaveDAQ 即時資料可視化系統是一個基於 Python 的振動數據採�
 
 ### Python 套件依賴
 請參考 `requirements.txt` 檔案，主要依賴包括：
-- `pymodbus>=3.6.0` - Modbus 通訊
-- `pyserial>=3.5.1` - 串列埠通訊
-- `Flask>=2.0.0` - Web 伺服器
+- `pymodbus>=3.11.3` - Modbus 通訊
+- `pyserial>=3.5` - 串列埠通訊
+- `Flask>=3.1.2` - Web 伺服器
 
 ## 安裝說明
 
 ### 1. 克隆或下載專案
 ```bash
 cd /path/to/ProWaveDAQ_Python_Visualization_Unit
+```
+
+### 簡易安裝指令
+```bash
+./deploy.sh
+```
+
+**注意**：`deploy.sh` 腳本在以下情況需要 `sudo` 權限：
+- 系統未安裝 Python 3、pip3 或 venv 模組時（需要安裝系統套件）
+- 需要將用戶加入 `dialout` 群組以存取串列埠時
+
+如果系統已安裝 Python 環境且用戶已在 `dialout` 群組中，則不需要 `sudo`。
+
+若需要 `sudo`，請執行：
+```bash
+sudo ./deploy.sh
 ```
 
 ### 2. 安裝 Python 依賴套件
@@ -68,7 +84,7 @@ pip3 install -r requirements.txt
 ### 3. 設定權限
 確保 Python 腳本有執行權限：
 ```bash
-chmod +x main_realtime_web.py
+chmod +x main.py
 chmod +x prowavedaq.py
 chmod +x csv_writer.py
 ```
@@ -94,21 +110,27 @@ newgrp dialout
 
 執行主程式：
 ```bash
-python3 main_realtime_web.py
+python3 main.py
 ```
 
 或直接執行：
 ```bash
-./main_realtime_web.py
+./main.py
 ```
+
+或是執行：
+```bash
+./run.sh
+```
+直接進入虛擬環境並啟動程式
 
 啟動成功後，您會看到類似以下的訊息：
 ```
 ============================================================
-ProWaveDAQ 即時資料可視化系統
+ProWaveDAQ Real-time Data Visualization System
 ============================================================
-Web 介面將在 http://0.0.0.0:8080/ 啟動
-按 Ctrl+C 停止伺服器
+Web interface will be available at http://0.0.0.0:8080/
+Press Ctrl+C to stop the server
 ============================================================
 ```
 
@@ -196,12 +218,15 @@ ProWaveDAQ_Python_Visualization_Unit/
 │
 ├── prowavedaq.py            # ProWaveDAQ 核心模組（Modbus 通訊）
 ├── csv_writer.py            # CSV 寫入器模組
-├── main_realtime_web.py     # 主控制程式（Web 介面）
-├── main.py                  # 原始命令列版本（參考用）
+├── main.py                  # 主控制程式（Web 介面）
 ├── requirements.txt         # Python 依賴套件列表
 ├── README.md                # 本文件
 ├── CURSOR.md                # 開發需求文件
-└── deploy.sh                # 部署腳本（如有）
+├── deploy.sh                # 部署腳本
+├── run.sh                   # 啟動腳本（進入虛擬環境並啟動程式）
+└── templates/               # HTML 模板目錄
+    ├── index.html           # 主頁模板
+    └── config.html          # 設定檔管理頁面模板
 ```
 
 ## API 路由說明
@@ -241,6 +266,8 @@ ProWaveDAQ_Python_Visualization_Unit/
   "message": "資料收集已啟動 (取樣率: 7812 Hz, 分檔間隔: 5 秒)"
 }
 ```
+
+**注意**：API 回應訊息目前為中文，但系統啟動訊息為英文。
 
 #### `/stop` (POST)
 回應：
@@ -318,12 +345,12 @@ ProWaveDAQ 設備
     ↓ (Modbus RTU)
 ProWaveDAQ 類別 (prowavedaq.py)
     ↓ (資料佇列)
-主程式 (main_realtime_web.py)
+主程式 (main.py)
     ├──→ 即時顯示 (記憶體變數)
     │       ↓
     │   Flask /data API
     │       ↓
-    │   前端 Chart.js
+    │   前端 Chart.js (templates/index.html)
     │
     └──→ CSV 儲存 (csv_writer.py)
             ↓
@@ -343,16 +370,18 @@ ProWaveDAQ 類別 (prowavedaq.py)
 
 如需擴展系統功能，可以：
 
-1. **修改前端介面**：編輯 `main_realtime_web.py` 中的 HTML 模板
-2. **調整圖表設定**：修改 Chart.js 的配置選項
-3. **新增 API 路由**：在 Flask 應用中新增路由處理函數
+1. **修改前端介面**：編輯 `templates/index.html` 和 `templates/config.html` 模板
+2. **調整圖表設定**：在 `templates/index.html` 中修改 Chart.js 的配置選項
+3. **新增 API 路由**：在 `main.py` 中新增路由處理函數
 4. **自訂 CSV 格式**：修改 `csv_writer.py` 中的寫入邏輯
 
 ### 程式碼結構
 
 - `prowavedaq.py`：負責 Modbus RTU 通訊與資料讀取
 - `csv_writer.py`：負責 CSV 檔案的建立與寫入
-- `main_realtime_web.py`：整合所有功能，提供 Web 介面
+- `main.py`：整合所有功能，提供 Web 介面（使用 Flask + templates）
+- `templates/index.html`：主頁 HTML 模板（包含 Chart.js 圖表）
+- `templates/config.html`：設定檔管理頁面模板
 
 ## 授權資訊
 
@@ -370,6 +399,13 @@ ProWaveDAQ 類別 (prowavedaq.py)
 - Web 介面控制
 - 自動 CSV 分檔儲存
 
+### Version 1.0.1
+- 將 HTML 部分改為模板以簡化 Python 程式碼整潔性
+
+## 已知錯誤
+- 讀取中，若進入 config 修改頁面再次回到主畫面程式碼會卡狀態。
+
 ---
 
-**最後更新**：2024年
+**最後更新**：2025年11月06日
+**作者**：王建葦

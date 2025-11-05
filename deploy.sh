@@ -1,190 +1,194 @@
 #!/bin/bash
-# ProWaveDAQ Python 版本自動部署腳本
-# 此腳本會自動設定開發環境和必要的系統權限
+# ProWaveDAQ Python Version Auto Deployment Script
+# This script automatically sets up the development environment and necessary system permissions
 
-set -e  # 遇到錯誤時立即退出
+set -e  # Exit immediately if a command exits with a non-zero status
 
-# 顏色定義
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 取得腳本所在目錄
+# Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}ProWaveDAQ Python 版本自動部署${NC}"
+echo -e "${BLUE}ProWaveDAQ Python Version Auto Deployment${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# 檢查並安裝 Python 相關套件
-echo -e "${YELLOW}[1/6] 檢查並安裝 Python 相關套件...${NC}"
+# Check and install Python packages
+echo -e "${YELLOW}[1/6] Checking and installing Python packages...${NC}"
 
-# 檢查是否為 Debian/Ubuntu 系統
+# Check if Debian/Ubuntu system
 if command -v apt-get &> /dev/null; then
-    # 檢查是否需要安裝 Python
+    # Check if Python needs to be installed
     if ! command -v python3 &> /dev/null; then
-        echo "正在安裝 python3..."
+        echo "Installing python3..."
         if [ "$EUID" -eq 0 ]; then
             apt-get update -qq
             apt-get install -y python3 python3-pip python3-venv
         else
-            echo -e "${YELLOW}需要 sudo 權限以安裝 Python 套件${NC}"
-            echo "請執行：sudo $0"
+            echo -e "${YELLOW}sudo privileges required to install Python packages${NC}"
+            echo "Please run: sudo $0"
             exit 1
         fi
     fi
     
-    # 檢查 pip3
+    # Check pip3
     if ! command -v pip3 &> /dev/null; then
-        echo "正在安裝 python3-pip..."
+        echo "Installing python3-pip..."
         if [ "$EUID" -eq 0 ]; then
             apt-get install -y python3-pip
         else
-            echo -e "${YELLOW}需要 sudo 權限以安裝 pip${NC}"
-            echo "請執行：sudo $0"
+            echo -e "${YELLOW}sudo privileges required to install pip${NC}"
+            echo "Please run: sudo $0"
             exit 1
         fi
     fi
     
-    # 檢查 venv 模組
+    # Check venv module
     if ! python3 -c "import venv" 2>/dev/null; then
-        echo "正在安裝 python3-venv..."
+        echo "Installing python3-venv..."
         if [ "$EUID" -eq 0 ]; then
             apt-get install -y python3-venv
         else
-            echo -e "${YELLOW}需要 sudo 權限以安裝 venv${NC}"
-            echo "請執行：sudo $0"
+            echo -e "${YELLOW}sudo privileges required to install venv${NC}"
+            echo "Please run: sudo $0"
             exit 1
         fi
     fi
 elif command -v yum &> /dev/null; then
-    # CentOS/RHEL 系統
+    # CentOS/RHEL system
     if ! command -v python3 &> /dev/null; then
-        echo "正在安裝 python3..."
+        echo "Installing python3..."
         if [ "$EUID" -eq 0 ]; then
             yum install -y python3 python3-pip
         else
-            echo -e "${YELLOW}需要 sudo 權限以安裝 Python 套件${NC}"
-            echo "請執行：sudo $0"
+            echo -e "${YELLOW}sudo privileges required to install Python packages${NC}"
+            echo "Please run: sudo $0"
             exit 1
         fi
     fi
 else
-    # 其他系統，只檢查不自動安裝
+    # Other systems, only check without auto-installation
     if ! command -v python3 &> /dev/null; then
-        echo -e "${RED}錯誤：找不到 python3 命令${NC}"
-        echo "請手動安裝 Python 3.10 或更高版本"
+        echo -e "${RED}Error: python3 command not found${NC}"
+        echo "Please manually install Python 3.10 or higher"
         exit 1
     fi
 fi
 
 PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-echo -e "${GREEN}Python 版本: $PYTHON_VERSION${NC}"
+echo -e "${GREEN}Python version: $PYTHON_VERSION${NC}"
 echo ""
 
-# 檢查是否需要建立虛擬環境
-echo -e "${YELLOW}[2/6] 設定 Python 虛擬環境...${NC}"
-if [ ! -d "venv" ]; then
-    echo "建立虛擬環境中..."
-    python3 -m venv venv
-    echo -e "${GREEN} 虛擬環境已建立${NC}"
-else
-    echo -e "${GREEN} 虛擬環境已存在${NC}"
+# Check if virtual environment needs to be created
+echo -e "${YELLOW}[2/6] Setting up Python virtual environment...${NC}"
+if [ -d "venv" ]; then
+    echo "Removing existing virtual environment..."
+    rm -rf venv
+    echo -e "${GREEN} Old virtual environment removed${NC}"
 fi
+echo "Creating virtual environment..."
+python3 -m venv venv
+echo -e "${GREEN} Virtual environment created${NC}"
 
-# 啟動虛擬環境並安裝依賴
-echo -e "${YELLOW}[3/6] 安裝依賴套件...${NC}"
+# Activate virtual environment and install dependencies
+echo -e "${YELLOW}[3/6] Installing dependencies...${NC}"
 source venv/bin/activate
 
-# 升級 pip
-echo "升級 pip..."
+# Upgrade pip
+echo "Upgrading pip..."
 pip install --upgrade pip --quiet
 
-# 安裝依賴套件
+# Install dependencies
 if [ -f "requirements.txt" ]; then
-    echo "安裝 requirements.txt 中的套件..."
+    echo "Installing packages from requirements.txt..."
     pip install -r requirements.txt
-    echo -e "${GREEN} 依賴套件安裝完成${NC}"
+    echo -e "${GREEN} Dependencies installed successfully${NC}"
 else
-    echo -e "${RED}警告：找不到 requirements.txt${NC}"
+    echo -e "${RED}Warning: requirements.txt not found${NC}"
 fi
 
 echo ""
 
-# 檢查並設定串列埠權限
-echo -e "${YELLOW}[4/6] 設定串列埠權限...${NC}"
+# Check and set serial port permissions
+echo -e "${YELLOW}[4/6] Setting serial port permissions...${NC}"
 CURRENT_USER=${SUDO_USER:-$USER}
 
 if [ "$EUID" -eq 0 ]; then
-    # 使用 sudo 執行時
+    # When running with sudo
     if groups "$CURRENT_USER" | grep -q "\bdialout\b"; then
-        echo -e "${GREEN} 用戶 $CURRENT_USER 已在 dialout 群組中${NC}"
+        echo -e "${GREEN} User $CURRENT_USER is already in dialout group${NC}"
     else
-        echo "將用戶 $CURRENT_USER 加入 dialout 群組..."
+        echo "Adding user $CURRENT_USER to dialout group..."
         usermod -aG dialout "$CURRENT_USER"
-        echo -e "${GREEN} 用戶已加入 dialout 群組${NC}"
-        echo -e "${YELLOW}注意：請登出並重新登入系統，或重新啟動系統，權限才會生效${NC}"
+        echo -e "${GREEN} User added to dialout group${NC}"
+        echo -e "${YELLOW}Note: Please log out and log in again, or reboot the system for permissions to take effect${NC}"
     fi
 else
-    # 未使用 sudo 執行時
+    # When running without sudo
     if groups | grep -q "\bdialout\b"; then
-        echo -e "${GREEN}當前用戶已在 dialout 群組中${NC}"
+        echo -e "${GREEN}Current user is already in dialout group${NC}"
     else
-        echo -e "${YELLOW}需要 sudo 權限以設定串列埠權限${NC}"
-        echo "請執行：sudo $0"
-        echo "或手動執行：sudo usermod -aG dialout $USER"
+        echo -e "${YELLOW}sudo privileges required to set serial port permissions${NC}"
+        echo "Please run: sudo $0"
+        echo "Or manually run: sudo usermod -aG dialout $USER"
     fi
 fi
 
 echo ""
 
-# 驗證安裝
-echo -e "${YELLOW}[5/6] 驗證安裝...${NC}"
+# Verify installation
+echo -e "${YELLOW}[5/6] Verifying installation...${NC}"
 
-# 檢查 pymodbus
+# Check pymodbus
 if python3 -c "from pymodbus.client import ModbusSerialClient" 2>/dev/null; then
-    echo -e "${GREEN} pymodbus 安裝成功${NC}"
+    echo -e "${GREEN} pymodbus installed successfully${NC}"
 else
-    echo -e "${RED} pymodbus 安裝失敗${NC}"
-    echo "請手動執行：pip install pymodbus>=3.11.3"
+    echo -e "${RED} pymodbus installation failed${NC}"
+    echo "Please manually run: pip install pymodbus>=3.11.3"
 fi
 
-# 檢查 pyserial
+# Check pyserial
 if python3 -c "import serial" 2>/dev/null; then
-    echo -e "${GREEN} pyserial 安裝成功${NC}"
+    echo -e "${GREEN} pyserial installed successfully${NC}"
 else
-    echo -e "${RED} pyserial 安裝失敗${NC}"
-    echo "請手動執行：pip install pyserial>=3.5"
+    echo -e "${RED} pyserial installation failed${NC}"
+    echo "Please manually run: pip install pyserial>=3.5"
 fi
 
-# 檢查設定檔案
-echo -e "${YELLOW}[6/6] 檢查設定檔案...${NC}"
+# Check configuration files
+echo -e "${YELLOW}[6/6] Checking configuration files...${NC}"
 if [ -f "API/ProWaveDAQ.ini" ]; then
-    echo -e "${GREEN}找到 ProWaveDAQ.ini${NC}"
+    echo -e "${GREEN}Found ProWaveDAQ.ini${NC}"
 else
-    echo -e "${YELLOW}警告：找不到 API/ProWaveDAQ.ini${NC}"
+    echo -e "${YELLOW}Warning: API/ProWaveDAQ.ini not found${NC}"
 fi
 
 if [ -f "API/Master.ini" ]; then
-    echo -e "${GREEN}找到 Master.ini${NC}"
+    echo -e "${GREEN}Found Master.ini${NC}"
 else
-    echo -e "${YELLOW}警告：找不到 API/Master.ini${NC}"
+    echo -e "${YELLOW}Warning: API/Master.ini not found${NC}"
 fi
 
 echo ""
 echo -e "${BLUE}========================================${NC}"
-echo -e "${GREEN}部署完成！${NC}"
+echo -e "${GREEN}Deployment completed!${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
-echo "接下來的步驟："
-echo "1. 如果剛才設定了 dialout 群組，請登出並重新登入系統"
-echo "2. 啟動程式："
+echo "Next steps:"
+echo "1. If dialout group was just configured, please log out and log in again"
+echo "2. Start the program:"
 echo "   cd $SCRIPT_DIR"
 echo "   source venv/bin/activate"
-echo "   python main.py"
+echo "   python3 main.py"
 echo ""
-echo "如需幫助，請參閱 README.md"
+echo "   Or use the run script:"
+echo "   ./run.sh"
+echo ""
+echo "For help, please refer to README.md"

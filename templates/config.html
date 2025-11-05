@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設定檔管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            background-color: #2196F3;
+            color: white;
+        }
+
+        button:hover {
+            background-color: #0b7dda;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        a {
+            color: #2196F3;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>設定檔管理</h1>
+        <p><a href="/">← 返回主頁</a></p>
+        <div id="statusArea"></div>
+
+        <form id="configForm" onsubmit="saveConfig(event)">
+            <div class="form-group">
+                <label for="prodaq_content">ProWaveDAQ.ini:</label>
+                <textarea id="prodaq_content" name="prodaq_content" required>{{ prodaq_content }}</textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="master_content">Master.ini:</label>
+                <textarea id="master_content" name="master_content" required>{{ master_content }}</textarea>
+            </div>
+
+            <button type="submit">儲存設定檔</button>
+        </form>
+    </div>
+
+    <script>
+        function saveConfig(event) {
+            event.preventDefault();
+
+            const formData = new FormData(document.getElementById('configForm'));
+
+            fetch('/config', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    const statusArea = document.getElementById('statusArea');
+                    if (data.success) {
+                        statusArea.innerHTML = '<div class="status status-success">設定檔已成功儲存！</div>';
+                    } else {
+                        statusArea.innerHTML = '<div class="status status-error">儲存失敗: ' + (data.message || '未知錯誤') + '</div>';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('statusArea').innerHTML = '<div class="status status-error">發生錯誤: ' + error + '</div>';
+                });
+        }
+    </script>
+</body>
+
+</html>
