@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,48 +12,58 @@
             margin: 20px;
             background-color: #f5f5f5;
         }
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
             background-color: white;
             padding: 20px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+
         h1 {
             color: #333;
             text-align: center;
         }
+
         .section {
             margin-bottom: 30px;
             padding: 15px;
             border: 1px solid #ddd;
             border-radius: 5px;
         }
+
         .section h2 {
             margin-top: 0;
             color: #555;
         }
+
         .form-group {
             margin-bottom: 15px;
         }
+
         label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
         }
-        input[type="text"], textarea {
+
+        input[type="text"],
+        textarea {
             width: 100%;
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
             box-sizing: border-box;
         }
+
         textarea {
             min-height: 100px;
             font-family: monospace;
             font-size: 12px;
         }
+
         button {
             padding: 10px 20px;
             margin: 5px;
@@ -61,56 +72,69 @@
             cursor: pointer;
             font-size: 16px;
         }
+
         .btn-start {
             background-color: #4CAF50;
             color: white;
         }
+
         .btn-start:hover {
             background-color: #45a049;
         }
+
         .btn-stop {
             background-color: #f44336;
             color: white;
         }
+
         .btn-stop:hover {
             background-color: #da190b;
         }
+
         .btn-save {
             background-color: #2196F3;
             color: white;
         }
+
         .btn-save:hover {
             background-color: #0b7dda;
         }
+
         .btn:disabled {
             background-color: #cccccc;
             cursor: not-allowed;
         }
+
         .status {
             padding: 10px;
             margin: 10px 0;
             border-radius: 4px;
         }
+
         .status-success {
             background-color: #d4edda;
             color: #155724;
             border: 1px solid #c3e6cb;
         }
+
         .status-error {
             background-color: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+
         .status-info {
             background-color: #d1ecf1;
             color: #0c5460;
             border: 1px solid #bee5eb;
         }
+
         #chartContainer {
             position: relative;
             height: 500px;
             margin-top: 20px;
         }
+
         .info {
             background-color: #e7f3ff;
             padding: 10px;
@@ -119,12 +143,13 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>ProWaveDAQ 即時資料可視化系統</h1>
-        
+
         <div id="statusArea"></div>
-        
+
         <div class="section">
             <h2>設定與控制</h2>
             <div class="form-group">
@@ -140,25 +165,30 @@
                 <strong>資料點數：</strong><span id="dataCount">0</span>
             </div>
         </div>
-        
+
         <div class="section">
             <h2>即時資料曲線</h2>
             <div id="chartContainer">
                 <canvas id="realtimeChart"></canvas>
             </div>
         </div>
-        
+
         <div class="section">
             <h2>設定檔管理</h2>
             <p><a href="/config">點擊這裡修改設定檔</a></p>
         </div>
+
+        <div class="section">
+            <h2>檔案瀏覽</h2>
+            <p><a href="/files_page">點擊這裡瀏覽輸出檔案</a></p>
+        </div>
     </div>
-    
+
     <script>
         let chart = null;
         let dataUpdateInterval = null;
         let isCollecting = false;
-        
+
         // 初始化 Chart.js
         function initChart() {
             const ctx = document.getElementById('realtimeChart').getContext('2d');
@@ -215,7 +245,7 @@
                 }
             });
         }
-        
+
         // 更新圖表資料
         function updateChart() {
             fetch('/data')
@@ -227,20 +257,20 @@
                         const channel2 = [];
                         const channel3 = [];
                         const labels = [];
-                        
+
                         for (let i = 0; i < data.data.length; i += 3) {
                             if (i < data.data.length) channel1.push(data.data[i]);
                             if (i + 1 < data.data.length) channel2.push(data.data[i + 1]);
                             if (i + 2 < data.data.length) channel3.push(data.data[i + 2]);
                             labels.push(i / 3);
                         }
-                        
+
                         // 更新圖表（不斷延伸，不重繪）
                         chart.data.labels = labels;
                         chart.data.datasets[0].data = channel1;
                         chart.data.datasets[1].data = channel2;
                         chart.data.datasets[2].data = channel3;
-                        
+
                         // 限制資料點數量以保持效能（保留最近5000個點）
                         if (chart.data.labels.length > 5000) {
                             const keep = 5000;
@@ -249,9 +279,9 @@
                             chart.data.datasets[1].data = chart.data.datasets[1].data.slice(-keep);
                             chart.data.datasets[2].data = chart.data.datasets[2].data.slice(-keep);
                         }
-                        
+
                         chart.update('none'); // 'none' 模式以提升效能
-                        
+
                         // 更新資料點數顯示
                         document.getElementById('dataCount').textContent = data.counter || 0;
                     }
@@ -260,7 +290,7 @@
                     console.error('更新資料時發生錯誤:', error);
                 });
         }
-        
+
         // 開始收集資料
         function startCollection() {
             const label = document.getElementById('labelInput').value.trim();
@@ -268,7 +298,7 @@
                 showStatus('請輸入資料標籤！', 'error');
                 return;
             }
-            
+
             fetch('/start', {
                 method: 'POST',
                 headers: {
@@ -276,57 +306,57 @@
                 },
                 body: JSON.stringify({ label: label })
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    isCollecting = true;
-                    document.getElementById('startBtn').disabled = true;
-                    document.getElementById('stopBtn').disabled = false;
-                    document.getElementById('labelInput').disabled = true;
-                    document.getElementById('statusText').textContent = '採集中...';
-                    showStatus('資料收集已開始', 'success');
-                    
-                    // 開始每 200ms 更新圖表
-                    if (dataUpdateInterval) clearInterval(dataUpdateInterval);
-                    dataUpdateInterval = setInterval(updateChart, 200);
-                } else {
-                    showStatus('啟動失敗: ' + (data.message || '未知錯誤'), 'error');
-                }
-            })
-            .catch(error => {
-                showStatus('啟動時發生錯誤: ' + error, 'error');
-            });
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        isCollecting = true;
+                        document.getElementById('startBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('labelInput').disabled = true;
+                        document.getElementById('statusText').textContent = '採集中...';
+                        showStatus('資料收集已開始', 'success');
+
+                        // 開始每 200ms 更新圖表
+                        if (dataUpdateInterval) clearInterval(dataUpdateInterval);
+                        dataUpdateInterval = setInterval(updateChart, 200);
+                    } else {
+                        showStatus('啟動失敗: ' + (data.message || '未知錯誤'), 'error');
+                    }
+                })
+                .catch(error => {
+                    showStatus('啟動時發生錯誤: ' + error, 'error');
+                });
         }
-        
+
         // 停止收集資料
         function stopCollection() {
             fetch('/stop', {
                 method: 'POST'
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    isCollecting = false;
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('stopBtn').disabled = true;
-                    document.getElementById('labelInput').disabled = false;
-                    document.getElementById('statusText').textContent = '已停止';
-                    showStatus('資料收集已停止', 'info');
-                    
-                    // 停止更新圖表
-                    if (dataUpdateInterval) {
-                        clearInterval(dataUpdateInterval);
-                        dataUpdateInterval = null;
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        isCollecting = false;
+                        document.getElementById('startBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('labelInput').disabled = false;
+                        document.getElementById('statusText').textContent = '已停止';
+                        showStatus('資料收集已停止', 'info');
+
+                        // 停止更新圖表
+                        if (dataUpdateInterval) {
+                            clearInterval(dataUpdateInterval);
+                            dataUpdateInterval = null;
+                        }
+                    } else {
+                        showStatus('停止失敗: ' + (data.message || '未知錯誤'), 'error');
                     }
-                } else {
-                    showStatus('停止失敗: ' + (data.message || '未知錯誤'), 'error');
-                }
-            })
-            .catch(error => {
-                showStatus('停止時發生錯誤: ' + error, 'error');
-            });
+                })
+                .catch(error => {
+                    showStatus('停止時發生錯誤: ' + error, 'error');
+                });
         }
-        
+
         // 顯示狀態訊息
         function showStatus(message, type) {
             const statusArea = document.getElementById('statusArea');
@@ -336,14 +366,40 @@
                 statusArea.innerHTML = '';
             }, 5000);
         }
-        
+
+        // 檢查並恢復收集狀態
+        function checkAndRestoreStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.is_collecting) {
+                        // 如果後端正在收集資料，恢復前端狀態
+                        isCollecting = true;
+                        document.getElementById('startBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('labelInput').disabled = true;
+                        document.getElementById('statusText').textContent = '採集中...';
+                        document.getElementById('dataCount').textContent = data.counter || 0;
+
+                        // 開始更新圖表
+                        if (dataUpdateInterval) clearInterval(dataUpdateInterval);
+                        dataUpdateInterval = setInterval(updateChart, 200);
+                    }
+                })
+                .catch(error => {
+                    console.error('檢查狀態時發生錯誤:', error);
+                });
+        }
+
         // 初始化
-        window.onload = function() {
+        window.onload = function () {
             initChart();
+            // 檢查並恢復狀態
+            checkAndRestoreStatus();
             // 初始更新一次
             updateChart();
         };
     </script>
 </body>
-</html>
 
+</html>

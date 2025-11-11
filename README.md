@@ -166,6 +166,13 @@ Press Ctrl+C to stop the server
    - 可以編輯 `ProWaveDAQ.ini` 和 `Master.ini`
    - 修改後點擊「儲存設定檔」
 
+7. **瀏覽和下載檔案**
+   - 點擊「檔案瀏覽」連結
+   - 可以瀏覽 `output/ProWaveDAQ/` 目錄中的所有資料夾和檔案
+   - 點擊資料夾名稱或「進入」按鈕可以進入資料夾
+   - 點擊「下載」按鈕可以下載 CSV 檔案
+   - 使用麵包屑導航可以返回上層目錄
+
 ### 設定檔說明
 
 #### ProWaveDAQ.ini
@@ -226,7 +233,8 @@ ProWaveDAQ_Python_Visualization_Unit/
 ├── run.sh                   # 啟動腳本（進入虛擬環境並啟動程式）
 └── templates/               # HTML 模板目錄
     ├── index.html           # 主頁模板
-    └── config.html          # 設定檔管理頁面模板
+    ├── config.html          # 設定檔管理頁面模板
+    └── files.html           # 檔案瀏覽頁面模板
 ```
 
 ## API 路由說明
@@ -235,10 +243,14 @@ ProWaveDAQ_Python_Visualization_Unit/
 |------|------|----------|
 | `/` | GET | 主頁，顯示設定表單、Label 輸入、開始/停止按鈕與折線圖 |
 | `/data` | GET | 回傳目前最新資料 JSON 給前端 |
+| `/status` | GET | 檢查資料收集狀態 |
 | `/config` | GET | 顯示設定檔編輯頁面 |
 | `/config` | POST | 儲存修改後的設定檔 |
 | `/start` | POST | 啟動 DAQ、CSVWriter 與即時顯示 |
 | `/stop` | POST | 停止所有執行緒、安全關閉 |
+| `/files_page` | GET | 檔案瀏覽頁面 |
+| `/files` | GET | 列出 output 目錄中的檔案和資料夾（查詢參數：path） |
+| `/download` | GET | 下載檔案（查詢參數：path） |
 
 ### API 回應格式
 
@@ -277,6 +289,47 @@ ProWaveDAQ_Python_Visualization_Unit/
   "message": "資料收集已停止"
 }
 ```
+
+#### `/status` (GET)
+回應：
+```json
+{
+  "success": true,
+  "is_collecting": true,
+  "counter": 12345
+}
+```
+
+#### `/files` (GET)
+查詢參數：
+- `path` (可選)：要瀏覽的子目錄路徑
+
+回應：
+```json
+{
+  "success": true,
+  "items": [
+    {
+      "name": "20240101120000_test_001",
+      "type": "directory",
+      "path": "20240101120000_test_001"
+    },
+    {
+      "name": "data.csv",
+      "type": "file",
+      "path": "data.csv",
+      "size": 1024
+    }
+  ],
+  "current_path": ""
+}
+```
+
+#### `/download` (GET)
+查詢參數：
+- `path` (必需)：要下載的檔案路徑
+
+回應：直接下載檔案
 
 ## 故障排除
 
@@ -402,8 +455,10 @@ ProWaveDAQ 類別 (prowavedaq.py)
 ### Version 1.0.1
 - 將 HTML 部分改為模板以簡化 Python 程式碼整潔性
 
-## 已知錯誤
-- 讀取中，若進入 config 修改頁面再次回到主畫面程式碼會卡狀態。
+### Version 1.0.2
+- 修復：讀取中進入 config 頁面再回到主畫面時，狀態會自動恢復
+- 新增：檔案瀏覽功能，可瀏覽 output 目錄中的資料夾和檔案
+- 新增：檔案下載功能
 
 ---
 

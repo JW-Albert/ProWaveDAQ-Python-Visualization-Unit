@@ -12,12 +12,21 @@ import threading
 import configparser
 from datetime import datetime
 from typing import List, Optional, Dict
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from prowavedaq import ProWaveDAQ
 from csv_writer import CSVWriter
 
+# 設定工作目錄為專案根目錄（src 的上一層）
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+os.chdir(PROJECT_ROOT)
+
+# 將 src 資料夾添加到 Python 路徑，以便導入模組
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
 # 全域狀態變數（用於記憶體中資料傳遞）
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 realtime_data: List[float] = []
 data_lock = threading.Lock()
 is_collecting = False
@@ -27,17 +36,29 @@ csv_writer_instance: Optional[CSVWriter] = None
 data_counter = 0
 target_size = 0
 current_data_size = 0
+# 追蹤是否有活躍的前端連線（用於優化：無連線時不更新即時資料緩衝區）
+last_data_request_time = 0
+data_request_lock = threading.Lock()
+DATA_REQUEST_TIMEOUT = 5.0  # 5 秒內沒有請求視為無活躍連線
 
 
 def update_realtime_data(data: List[float]) -> None:
     """更新即時資料（供前端顯示）"""
-    global realtime_data, data_counter
+    global realtime_data, data_counter, last_data_request_time
+    
+    # 檢查是否有活躍的前端連線
+    with data_request_lock:
+        has_active_connection = (time.time() - last_data_request_time) < DATA_REQUEST_TIMEOUT
+    
+    # 只有在有活躍連線時才更新即時資料緩衝區
+    # 但始終更新計數器（用於狀態顯示）
     with data_lock:
-        realtime_data.extend(data)
+        if has_active_connection:
+            realtime_data.extend(data)
+            # 限制記憶體使用，保留最近 10000 個資料點
+            if len(realtime_data) > 10000:
+                realtime_data = realtime_data[-10000:]
         data_counter += len(data)
-        # 限制記憶體使用，保留最近 10000 個資料點
-        if len(realtime_data) > 10000:
-            realtime_data = realtime_data[-10000:]
 
 
 def get_realtime_data() -> List[float]:
@@ -53,14 +74,36 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/files_page')
+def files_page():
+    """檔案瀏覽頁面"""
+    return render_template('files.html')
+
+
 @app.route('/data')
 def get_data():
     """回傳目前最新資料 JSON 給前端"""
+    global last_data_request_time
+    # 更新最後請求時間（表示有活躍的前端連線）
+    with data_request_lock:
+        last_data_request_time = time.time()
+    
     data = get_realtime_data()
     global data_counter
     return jsonify({
         'success': True,
         'data': data,
+        'counter': data_counter
+    })
+
+
+@app.route('/status')
+def get_status():
+    """檢查資料收集狀態"""
+    global is_collecting, data_counter
+    return jsonify({
+        'success': True,
+        'is_collecting': is_collecting,
         'counter': data_counter
     })
 
@@ -129,6 +172,10 @@ def start_collection():
             realtime_data = []
             data_counter = 0
             current_data_size = 0
+        # 重置請求時間追蹤
+        with data_request_lock:
+            global last_data_request_time
+            last_data_request_time = 0
 
         # 載入設定檔
         ini_file_path = "API/Master.ini"
@@ -150,10 +197,10 @@ def start_collection():
         expected_samples_per_second = sample_rate * channels
         target_size = save_unit * expected_samples_per_second
 
-        # 建立輸出目錄
+        # 建立輸出目錄（在專案根目錄的 output 資料夾中）
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         folder = f"{timestamp}_{label}"
-        output_path = os.path.join("output", "ProWaveDAQ", folder)
+        output_path = os.path.join(PROJECT_ROOT, "output", "ProWaveDAQ", folder)
         os.makedirs(output_path, exist_ok=True)
 
         # 初始化 CSV Writer
@@ -200,6 +247,97 @@ def stop_collection():
 
     except Exception as e:
         return jsonify({'success': False, 'message': f'停止失敗: {str(e)}'})
+
+
+@app.route('/files')
+def list_files():
+    """列出 output 目錄中的檔案和資料夾"""
+    try:
+        path = request.args.get('path', '')
+        # 安全檢查：只允許在專案根目錄的 output/ProWaveDAQ 目錄下瀏覽
+        base_path = os.path.join(PROJECT_ROOT, "output", "ProWaveDAQ")
+        
+        if path:
+            # 確保路徑在 base_path 內
+            full_path = os.path.join(base_path, path)
+            # 標準化路徑以檢查是否在 base_path 內
+            full_path = os.path.normpath(full_path)
+            base_path_norm = os.path.normpath(os.path.abspath(base_path))
+            full_path_abs = os.path.abspath(full_path)
+            
+            if not full_path_abs.startswith(base_path_norm):
+                return jsonify({'success': False, 'message': '無效的路徑'})
+        else:
+            full_path = base_path
+        
+        if not os.path.exists(full_path):
+            return jsonify({'success': False, 'message': '路徑不存在'})
+        
+        items = []
+        try:
+            for item in sorted(os.listdir(full_path)):
+                item_path = os.path.join(full_path, item)
+                relative_path = os.path.join(path, item) if path else item
+                relative_path = relative_path.replace('\\', '/')  # 統一使用 /
+                
+                if os.path.isdir(item_path):
+                    items.append({
+                        'name': item,
+                        'type': 'directory',
+                        'path': relative_path
+                    })
+                else:
+                    size = os.path.getsize(item_path)
+                    items.append({
+                        'name': item,
+                        'type': 'file',
+                        'path': relative_path,
+                        'size': size
+                    })
+        except PermissionError:
+            return jsonify({'success': False, 'message': '沒有權限讀取此目錄'})
+        
+        return jsonify({
+            'success': True,
+            'items': items,
+            'current_path': path
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/download')
+def download_file():
+    """下載檔案"""
+    try:
+        path = request.args.get('path', '')
+        if not path:
+            return jsonify({'success': False, 'message': '請提供檔案路徑'})
+        
+        # 安全檢查：只允許下載專案根目錄的 output/ProWaveDAQ 目錄下的檔案
+        base_path = os.path.join(PROJECT_ROOT, "output", "ProWaveDAQ")
+        full_path = os.path.join(base_path, path)
+        
+        # 標準化路徑以檢查是否在 base_path 內
+        full_path = os.path.normpath(full_path)
+        base_path_norm = os.path.normpath(os.path.abspath(base_path))
+        full_path_abs = os.path.abspath(full_path)
+        
+        if not full_path_abs.startswith(base_path_norm):
+            return jsonify({'success': False, 'message': '無效的路徑'})
+        
+        if not os.path.exists(full_path):
+            return jsonify({'success': False, 'message': '檔案不存在'})
+        
+        if os.path.isdir(full_path):
+            return jsonify({'success': False, 'message': '無法下載資料夾'})
+        
+        directory = os.path.dirname(full_path)
+        filename = os.path.basename(full_path)
+        
+        return send_from_directory(directory, filename, as_attachment=True)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
 
 
 def collection_loop():

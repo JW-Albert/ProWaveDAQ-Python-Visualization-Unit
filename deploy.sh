@@ -24,63 +24,8 @@ echo ""
 echo -e "${YELLOW}[1/6] Checking and installing Python packages...${NC}"
 
 # Check if Debian/Ubuntu system
-if command -v apt-get &> /dev/null; then
-    # Check if Python needs to be installed
-    if ! command -v python3 &> /dev/null; then
-        echo "Installing python3..."
-        if [ "$EUID" -eq 0 ]; then
-            apt-get update -qq
-            apt-get install -y python3 python3-pip python3-venv
-        else
-            echo -e "${YELLOW}sudo privileges required to install Python packages${NC}"
-            echo "Please run: sudo $0"
-            exit 1
-        fi
-    fi
-    
-    # Check pip3
-    if ! command -v pip3 &> /dev/null; then
-        echo "Installing python3-pip..."
-        if [ "$EUID" -eq 0 ]; then
-            apt-get install -y python3-pip
-        else
-            echo -e "${YELLOW}sudo privileges required to install pip${NC}"
-            echo "Please run: sudo $0"
-            exit 1
-        fi
-    fi
-    
-    # Check venv module
-    if ! python3 -c "import venv" 2>/dev/null; then
-        echo "Installing python3-venv..."
-        if [ "$EUID" -eq 0 ]; then
-            apt-get install -y python3-venv
-        else
-            echo -e "${YELLOW}sudo privileges required to install venv${NC}"
-            echo "Please run: sudo $0"
-            exit 1
-        fi
-    fi
-elif command -v yum &> /dev/null; then
-    # CentOS/RHEL system
-    if ! command -v python3 &> /dev/null; then
-        echo "Installing python3..."
-        if [ "$EUID" -eq 0 ]; then
-            yum install -y python3 python3-pip
-        else
-            echo -e "${YELLOW}sudo privileges required to install Python packages${NC}"
-            echo "Please run: sudo $0"
-            exit 1
-        fi
-    fi
-else
-    # Other systems, only check without auto-installation
-    if ! command -v python3 &> /dev/null; then
-        echo -e "${RED}Error: python3 command not found${NC}"
-        echo "Please manually install Python 3.10 or higher"
-        exit 1
-    fi
-fi
+apt-get update && apt-get upgrade -y
+apt-get install -y python3 python3-pip python3-venv
 
 PYTHON_VERSION=$(python3 --version | awk '{print $2}')
 echo -e "${GREEN}Python version: $PYTHON_VERSION${NC}"
@@ -106,12 +51,12 @@ echo "Upgrading pip..."
 pip install --upgrade pip --quiet
 
 # Install dependencies
-if [ -f "requirements.txt" ]; then
-    echo "Installing packages from requirements.txt..."
-    pip install -r requirements.txt
+if [ -f "src/requirements.txt" ]; then
+    echo "Installing packages from src/requirements.txt..."
+    pip install -r src/requirements.txt
     echo -e "${GREEN} Dependencies installed successfully${NC}"
 else
-    echo -e "${RED}Warning: requirements.txt not found${NC}"
+    echo -e "${RED}Warning: src/requirements.txt not found${NC}"
 fi
 
 echo ""
@@ -186,7 +131,7 @@ echo "1. If dialout group was just configured, please log out and log in again"
 echo "2. Start the program:"
 echo "   cd $SCRIPT_DIR"
 echo "   source venv/bin/activate"
-echo "   python3 main.py"
+echo "   python3 src/main.py"
 echo ""
 echo "   Or use the run script:"
 echo "   ./run.sh"

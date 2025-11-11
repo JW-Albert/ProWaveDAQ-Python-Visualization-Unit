@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>檔案瀏覽</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .breadcrumb {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+
+        .breadcrumb a {
+            color: #2196F3;
+            text-decoration: none;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        .file-list {
+            margin-top: 20px;
+        }
+
+        .file-item {
+            padding: 12px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #fff;
+            transition: background-color 0.2s;
+        }
+
+        .file-item:hover {
+            background-color: #f9f9f9;
+        }
+
+        .file-item.directory {
+            cursor: pointer;
+        }
+
+        .file-item.directory:hover {
+            background-color: #e3f2fd;
+        }
+
+        .file-icon {
+            margin-right: 10px;
+            font-size: 20px;
+        }
+
+        .file-name {
+            flex: 1;
+            font-weight: bold;
+        }
+
+        .file-size {
+            color: #666;
+            margin-right: 10px;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-download {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .btn-download:hover {
+            background-color: #45a049;
+        }
+
+        .btn-enter {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        .btn-enter:hover {
+            background-color: #0b7dda;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        a {
+            color: #2196F3;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>檔案瀏覽</h1>
+        <p><a href="/">← 返回主頁</a></p>
+
+        <div id="statusArea"></div>
+
+        <div class="breadcrumb" id="breadcrumb">
+            <a href="#" onclick="navigateTo(''); return false;">output/ProWaveDAQ</a>
+        </div>
+
+        <div id="fileList" class="file-list">
+            <div class="loading">載入中...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentPath = '';
+
+        // 格式化檔案大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        // 載入檔案列表
+        function loadFiles(path) {
+            currentPath = path || '';
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '<div class="loading">載入中...</div>';
+
+            const url = '/files' + (path ? '?path=' + encodeURIComponent(path) : '');
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayFiles(data.items, data.current_path);
+                        updateBreadcrumb(data.current_path);
+                    } else {
+                        showError('載入失敗: ' + (data.message || '未知錯誤'));
+                    }
+                })
+                .catch(error => {
+                    showError('載入時發生錯誤: ' + error);
+                });
+        }
+
+        // 顯示檔案列表
+        function displayFiles(items, path) {
+            const fileList = document.getElementById('fileList');
+
+            if (items.length === 0) {
+                fileList.innerHTML = '<div class="loading">此目錄為空</div>';
+                return;
+            }
+
+            let html = '';
+            items.forEach(item => {
+                if (item.type === 'directory') {
+                    html += `
+                        <div class="file-item directory" onclick="navigateTo('${item.path}')">
+                            <span class="file-icon">📁</span>
+                            <span class="file-name">${item.name}</span>
+                            <span class="file-size">資料夾</span>
+                            <div class="file-actions">
+                                <button class="btn-enter" onclick="event.stopPropagation(); navigateTo('${item.path}')">進入</button>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="file-item">
+                            <span class="file-icon">📄</span>
+                            <span class="file-name">${item.name}</span>
+                            <span class="file-size">${formatFileSize(item.size)}</span>
+                            <div class="file-actions">
+                                <button class="btn-download" onclick="downloadFile('${item.path}')">下載</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            fileList.innerHTML = html;
+        }
+
+        // 更新麵包屑導航
+        function updateBreadcrumb(path) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            if (!path) {
+                breadcrumb.innerHTML = '<a href="#" onclick="navigateTo(\'\'); return false;">output/ProWaveDAQ</a>';
+                return;
+            }
+
+            const parts = path.split('/').filter(p => p);
+            let html = '<a href="#" onclick="navigateTo(\'\'); return false;">output/ProWaveDAQ</a>';
+
+            let currentPath = '';
+            parts.forEach((part, index) => {
+                currentPath += (currentPath ? '/' : '') + part;
+                html += ' / ';
+                if (index === parts.length - 1) {
+                    html += '<span>' + part + '</span>';
+                } else {
+                    html += '<a href="#" onclick="navigateTo(\'' + currentPath + '\'); return false;">' + part + '</a>';
+                }
+            });
+
+            breadcrumb.innerHTML = html;
+        }
+
+        // 導航到指定路徑
+        function navigateTo(path) {
+            loadFiles(path);
+        }
+
+        // 下載檔案
+        function downloadFile(path) {
+            const url = '/download?path=' + encodeURIComponent(path);
+            window.location.href = url;
+        }
+
+        // 顯示錯誤訊息
+        function showError(message) {
+            const statusArea = document.getElementById('statusArea');
+            statusArea.innerHTML = '<div class="status status-error">' + message + '</div>';
+        }
+
+        // 初始化：載入根目錄
+        window.onload = function () {
+            loadFiles('');
+        };
+    </script>
+</body>
+
+</html>
