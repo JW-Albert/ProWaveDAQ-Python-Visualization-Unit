@@ -20,7 +20,19 @@ except ImportError:
     except ImportError:
         PYMySQL_AVAILABLE = False
         MYSQL_CONNECTOR_AVAILABLE = False
-        print("[Warning] 未安裝 pymysql 或 mysql-connector-python，SQL 上傳功能將無法使用")
+
+# 導入統一日誌系統
+try:
+    from logger import info, debug, error, warning
+except ImportError:
+    # 如果無法導入，使用簡單的 fallback
+    def info(msg): print(f"[INFO] {msg}")
+    def debug(msg): print(f"[Debug] {msg}")
+    def error(msg): print(f"[Error] {msg}")
+    def warning(msg): print(f"[Warning] {msg}")
+
+if not PYMySQL_AVAILABLE and not MYSQL_CONNECTOR_AVAILABLE:
+    warning("未安裝 pymysql 或 mysql-connector-python，SQL 上傳功能將無法使用")
 
 
 class SQLUploader:
@@ -75,7 +87,7 @@ class SQLUploader:
                     autocommit=False
                 )
         except Exception as e:
-            print(f"[Error] SQL 連線失敗: {e}")
+            error(f"SQL 連線失敗: {e}")
             raise
 
     def _ensure_table_exists(self) -> None:
@@ -103,10 +115,10 @@ class SQLUploader:
             cursor.close()
             conn.close()
             self.is_connected = True
-            print("[Info] SQL 資料表已確認存在或已建立")
+            info("SQL 資料表已確認存在或已建立")
 
         except Exception as e:
-            print(f"[Error] 建立 SQL 資料表失敗: {e}")
+            error(f"建立 SQL 資料表失敗: {e}")
             self.is_connected = False
 
     def _reconnect(self) -> bool:
@@ -124,94 +136,121 @@ class SQLUploader:
             else:  # mysql.connector
                 self.cursor = self.connection.cursor()
             self.is_connected = True
-            print("[Info] SQL 連線已重新建立")
+            info("SQL 連線已重新建立")
             return True
         except Exception as e:
-            print(f"[Error] SQL 重新連線失敗: {e}")
+            error(f"SQL 重新連線失敗: {e}")
             self.is_connected = False
             return False
 
     def add_data_block(self, data: List[float]) -> bool:
         """
         新增數據區塊到 SQL 伺服器
-
+        
+        此方法會將資料按通道分組（每 3 個為一組：X, Y, Z），
+        並使用批次插入（executemany）提升效能。
+        
+        錯誤處理機制：
+        - 最多重試 3 次
+        - 每次重試前會檢查連線狀態，如果斷線則嘗試重連
+        - 重試延遲時間遞增（0.1s, 0.2s, 0.3s）
+        - 如果所有重試都失敗，返回 False（資料不會遺失，會保留在緩衝區）
+        
         Args:
-            data: 振動數據列表
+            data: 振動數據列表，格式為 [X1, Y1, Z1, X2, Y2, Z2, ...]
         
         Returns:
             bool: 上傳成功返回 True，失敗返回 False
+        
+        注意：
+            - 此方法使用執行緒鎖（upload_lock）確保多執行緒安全
+            - 如果資料長度不是 channels 的倍數，不足的部分會填充 0.0
+            - 所有資料使用相同的時間戳記（當前時間）
+            - 使用批次插入（executemany）可以大幅提升插入效能
         """
         if not data or not self.is_connected:
             return False
 
+        # 使用執行緒鎖確保多執行緒安全
         with self.upload_lock:
             max_retries = 3  # 最多重試 3 次
             retry_count = 0
             
             while retry_count < max_retries:
                 try:
-                    # 確保連線有效
+                    # ========== 步驟 1：確保連線有效 ==========
                     if not self.connection:
                         if not self._reconnect():
                             retry_count += 1
                             time.sleep(0.1 * retry_count)  # 遞增延遲
                             continue
 
-                    # 檢查連線是否還有效
+                    # ========== 步驟 2：檢查連線是否還有效 ==========
                     try:
                         if PYMySQL_AVAILABLE:
+                            # pymysql: 使用 ping 檢查連線，如果斷線則自動重連
                             self.connection.ping(reconnect=True)
                         else:  # mysql.connector
+                            # mysql.connector: 檢查連線狀態
                             if not self.connection.is_connected():
                                 if not self._reconnect():
                                     retry_count += 1
                                     time.sleep(0.1 * retry_count)
                                     continue
                     except:
+                        # 檢查連線時發生錯誤，嘗試重連
                         if not self._reconnect():
                             retry_count += 1
                             time.sleep(0.1 * retry_count)
                             continue
 
-                    # 準備插入 SQL
+                    # ========== 步驟 3：準備 SQL 插入語句 ==========
                     insert_sql = """
                     INSERT INTO vibration_data (timestamp, label, channel_1, channel_2, channel_3)
                     VALUES (%s, %s, %s, %s, %s)
                     """
 
+                    # 使用當前時間作為時間戳記（所有資料使用相同時間戳記）
                     timestamp = datetime.now()
                     rows_to_insert = []
 
-                    # 將數據按通道分組
+                    # ========== 步驟 4：將數據按通道分組 ==========
+                    # 資料格式：[X1, Y1, Z1, X2, Y2, Z2, ...]
+                    # 每 channels 個資料為一組（一個樣本）
                     for i in range(0, len(data), self.channels):
                         row_data = [
-                            timestamp,
-                            self.label,
-                            data[i] if i < len(data) else 0.0,
-                            data[i + 1] if i + 1 < len(data) else 0.0,
-                            data[i + 2] if i + 2 < len(data) else 0.0
+                            timestamp,  # 時間戳記
+                            self.label,  # 標籤名稱
+                            data[i] if i < len(data) else 0.0,  # Channel 1 (X)
+                            data[i + 1] if i + 1 < len(data) else 0.0,  # Channel 2 (Y)
+                            data[i + 2] if i + 2 < len(data) else 0.0  # Channel 3 (Z)
                         ]
                         rows_to_insert.append(tuple(row_data))
 
-                    # 批次插入（提升效能）
+                    # ========== 步驟 5：批次插入資料（提升效能） ==========
                     if rows_to_insert:
+                        # 確保游標存在
                         if not self.cursor:
                             self.cursor = self.connection.cursor()
+                        # 使用 executemany 批次插入（比逐筆插入快很多）
                         self.cursor.executemany(insert_sql, rows_to_insert)
+                        # 提交事務
                         self.connection.commit()
                         
                         # 上傳成功
                         return True
 
                 except Exception as e:
-                    print(f"[Error] SQL 寫入資料失敗 (嘗試 {retry_count + 1}/{max_retries}): {e}")
+                    # ========== 錯誤處理：記錄錯誤並重試 ==========
+                    error(f"SQL 寫入資料失敗 (嘗試 {retry_count + 1}/{max_retries}): {e}")
                     try:
+                        # 嘗試回滾事務（如果有的話）
                         if self.connection:
                             self.connection.rollback()
                     except:
                         pass
                     
-                    # 嘗試重新連線
+                    # 標記連線為無效，下次重試時會嘗試重連
                     self.is_connected = False
                     retry_count += 1
                     
@@ -221,7 +260,8 @@ class SQLUploader:
                         if not self._reconnect():
                             continue
                     else:
-                        print(f"[Error] SQL 寫入資料失敗，已重試 {max_retries} 次，放棄此次上傳")
+                        # 所有重試都失敗
+                        error(f"SQL 寫入資料失敗，已重試 {max_retries} 次，放棄此次上傳")
                         return False
             
             return False
@@ -237,9 +277,9 @@ class SQLUploader:
                     self.connection.close()
                     self.connection = None
                 self.is_connected = False
-                print("[Info] SQL 連線已關閉")
+                info("SQL 連線已關閉")
             except Exception as e:
-                print(f"[Error] 關閉 SQL 連線時發生錯誤: {e}")
+                error(f"關閉 SQL 連線時發生錯誤: {e}")
 
     def __del__(self):
         """解構函數"""
