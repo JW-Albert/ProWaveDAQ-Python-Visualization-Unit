@@ -27,9 +27,12 @@ ProWaveDAQ 即時資料可視化系統是一個基於 Python 的振動數據採�
 - 使用 Chart.js 實現即時圖表（每 200ms 更新）
 - 多執行緒架構，確保資料採集與 Web 服務不互相干擾
 - 記憶體中資料傳遞，高效能即時處理
-- 支援多通道資料顯示（預設 3 通道）
+- 支援多通道資料顯示（預設 3 通道：X, Y, Z）
 - 智慧緩衝區管理，優化記憶體使用
 - 資料保護機制，確保資料不遺失（重試機制、失敗保留）
+- 統一日誌系統，自動時間戳記和日誌級別管理
+- 通道錯位保護機制，確保資料順序正確
+- 時間戳記精確計算，根據取樣率自動計算每個樣本的時間
 
 ## 系統需求
 
@@ -265,10 +268,15 @@ YYYYMMDDHHMMSS_<Label>_002.csv
 ```
 
 每個 CSV 檔案包含：
-- `Timestamp` - 時間戳記
-- `Channel_1` - 通道 1 資料
-- `Channel_2` - 通道 2 資料
-- `Channel_3` - 通道 3 資料
+- `Timestamp` - 時間戳記（根據取樣率精確計算）
+- `Channel_1(X)` - 通道 1 資料（對應 X 軸）
+- `Channel_2(Y)` - 通道 2 資料（對應 Y 軸）
+- `Channel_3(Z)` - 通道 3 資料（對應 Z 軸）
+
+**資料格式說明**：
+- 資料格式：`[長度, X, Y, Z, X, Y, Z, ...]`
+- 從設備讀取時，第0格為長度，之後依序為 X, Y, Z 循環
+- 時間戳記根據取樣率自動計算，確保每個樣本的時間間隔正確
 
 #### SQL 資料庫
 如果啟用 SQL 上傳，資料會儲存在 `vibration_data` 資料表中，包含：
@@ -297,6 +305,7 @@ ProWaveDAQ_Python_Visualization_Unit/
 │   ├── prowavedaq.py       # ProWaveDAQ 核心模組（Modbus 通訊）
 │   ├── csv_writer.py       # CSV 寫入器模組
 │   ├── sql_uploader.py     # SQL 上傳器模組
+│   ├── logger.py           # 統一日誌系統模組
 │   ├── main.py             # 主控制程式（Web 介面）
 │   ├── requirements.txt    # Python 依賴套件列表
 │   └── templates/          # HTML 模板目錄
@@ -434,7 +443,14 @@ ProWaveDAQ_Python_Visualization_Unit/
 ```
 ProWaveDAQ 設備 (Modbus RTU)
     ↓
+    資料格式：[長度, X, Y, Z, X, Y, Z, ...]
+    ↓
 ProWaveDAQ._read_loop() [背景執行緒]
+    ├─→ 讀取資料長度（第0格）
+    ├─→ 讀取完整資料（包含長度）
+    ├─→ 處理長度不是3的倍數的情況（remaining_data 機制）
+    ├─→ 確保只處理完整的樣本（X, Y, Z 組合）
+    └─→ 資料轉換（16位元整數 → 浮點數）
     ↓ (放入佇列)
 data_queue (queue.Queue, 最大 1000 筆)
     ↓
@@ -448,14 +464,15 @@ collection_loop() [背景執行緒]
     │   前端 Chart.js (templates/index.html)
     │
     ├─→ CSV Writer
-    │       ↓
-    │   CSV 檔案 (分檔儲存)
+    │   ├─→ 根據取樣率計算時間戳記
+    │   ├─→ 確保分檔時時間戳記連續
+    │   └─→ CSV 檔案 (分檔儲存，確保樣本邊界)
     │
     └─→ SQL Uploader
-            ↓
-        SQL 資料緩衝區 (累積到門檻)
-            ↓
-        MariaDB/MySQL 資料庫
+            ├─→ 確保上傳大小是3的倍數（樣本邊界）
+            └─→ SQL 資料緩衝區 (累積到門檻)
+                ↓
+            MariaDB/MySQL 資料庫
 ```
 
 ### 即時資料回傳機制
@@ -499,6 +516,12 @@ function updateChart() {
 3. **分檔邏輯**：
    - 如果 `current_data_size < target_size`：直接寫入當前檔案
    - 如果 `current_data_size >= target_size`：分批處理，建立新檔案
+   - **重要**：確保切斷位置在樣本邊界（3的倍數），避免通道錯位
+
+4. **時間戳記計算**：
+   - 每個樣本的時間間隔 = 1 / sample_rate 秒
+   - 時間戳記 = 全局起始時間 + (樣本計數 × 樣本間隔)
+   - 確保分檔時時間戳記連續
 
 ### SQL 上傳機制
 
@@ -605,9 +628,37 @@ function updateChart() {
 - 系統會自動限制緩衝區大小（最多 10,000,000 個資料點）
 - 如果持續出現記憶體問題，可以降低 `sql_upload_interval` 值
 
+#### 8. 通道順序錯位
+**症狀**：CSV 檔案或圖表中的通道順序不正確
+
+**解決方法**：
+- 系統已自動處理此問題（使用 `remaining_data` 機制）
+- 如果仍有問題，檢查：
+  - 資料格式是否正確：`[長度, X, Y, Z, X, Y, Z, ...]`
+  - 檢查日誌中是否有「Remaining data points」警告
+  - 查看 `通道錯誤可能性分析.md` 文件了解詳細情況
+
+### 日誌系統
+
+系統使用統一的日誌系統（`logger.py`），提供以下日誌級別：
+- `[INFO]` - 一般資訊訊息
+- `[Debug]` - 調試訊息（可透過 `Logger.set_debug_enabled(False)` 關閉）
+- `[Error]` - 錯誤訊息
+- `[Warning]` - 警告訊息
+
+所有日誌訊息自動包含時間戳記，格式為：
+```
+[YYYY-MM-DD HH:MM:SS] [LEVEL] 訊息內容
+```
+
+**注意**：Flask 的 HTTP 請求日誌已預設隱藏，只顯示應用程式的日誌訊息。
+
 ### 除錯模式
 
-如需查看詳細的除錯資訊，可以修改程式碼中的 `print` 語句，或使用 Python 的日誌模組。
+如需查看詳細的除錯資訊，可以：
+- 查看終端機的日誌輸出
+- 使用 `Logger.set_debug_enabled(True)` 啟用 Debug 訊息
+- 檢查 `通道錯誤可能性分析.md` 文件了解可能的問題
 
 ## 技術架構
 
@@ -718,9 +769,25 @@ collection_loop() [背景執行緒]
 ### 程式碼結構
 
 - `src/prowavedaq.py`：負責 Modbus RTU 通訊與資料讀取
+  - 處理資料格式：`[長度, X, Y, Z, X, Y, Z, ...]`
+  - 自動處理長度不是3的倍數的情況（使用 `remaining_data` 機制）
+  - 多執行緒安全保護（使用鎖定機制）
+  - 資料完整性檢查
 - `src/csv_writer.py`：負責 CSV 檔案的建立與寫入
+  - 根據取樣率自動計算時間戳記
+  - 確保分檔時時間戳記連續
+  - 通道標示：Channel_1(X), Channel_2(Y), Channel_3(Z)
 - `src/sql_uploader.py`：負責 SQL 資料庫連線與資料上傳
+  - 支援 MySQL/MariaDB
+  - 重試機制和資料保護
+- `src/logger.py`：統一日誌系統
+  - 提供統一的日誌格式
+  - 支援多種日誌級別
+  - 自動時間戳記
 - `src/main.py`：整合所有功能，提供 Web 介面（使用 Flask + templates）
+  - 分檔邏輯確保樣本邊界（3的倍數）
+  - SQL 上傳確保樣本邊界
+  - 智慧緩衝區管理
 - `src/templates/index.html`：主頁 HTML 模板（包含 Chart.js 圖表、SQL 設定）
 - `src/templates/config.html`：設定檔管理頁面模板（固定輸入框）
 - `src/templates/files.html`：檔案瀏覽頁面模板
@@ -753,6 +820,36 @@ collection_loop() [背景執行緒]
 如有問題或建議，請聯絡專案維護者。
 
 ## 更新日誌
+
+### Version 2.1.0
+- **新增**：統一日誌系統 (`logger.py`)
+  - 提供統一的日誌格式：`[YYYY-MM-DD HH:MM:SS] [LEVEL] 訊息`
+  - 支援 INFO、Debug、Error、Warning 四種級別
+  - 自動時間戳記
+  - 可控制 Debug 訊息開關
+- **修正**：通道錯位問題
+  - 處理資料長度不是3的倍數的情況
+  - 使用 `remaining_data` 機制追蹤剩餘資料點
+  - 確保每次只處理完整的樣本（X, Y, Z 組合）
+  - 多執行緒安全保護（使用鎖定機制）
+- **修正**：時間戳記計算
+  - 根據取樣率自動計算每個樣本的時間戳記
+  - 確保分檔時時間戳記連續
+  - 每個樣本的時間間隔 = 1 / sample_rate 秒
+- **改進**：資料讀取邏輯
+  - 添加資料完整性檢查
+  - 重新連線時自動清空剩餘資料
+  - 停止讀取時處理剩餘資料
+- **改進**：分檔邏輯
+  - 確保切斷位置在樣本邊界（3的倍數）
+  - SQL 上傳時也確保樣本邊界
+- **改進**：日誌輸出
+  - 隱藏 Flask HTTP 請求日誌
+  - 只顯示應用程式的日誌訊息
+- **新增**：通道標示
+  - CSV 標題明確標示通道對應：Channel_1(X), Channel_2(Y), Channel_3(Z)
+- **新增**：分析文檔
+  - `通道錯誤可能性分析.md` - 詳細分析可能導致通道錯誤的情況
 
 ### Version 2.0.0
 - **新增**：SQL 資料庫上傳功能
@@ -790,5 +887,6 @@ collection_loop() [背景執行緒]
 
 ---
 
-**最後更新**：2025年11月20日  
-**作者**：王建葦
+**最後更新**：2025年11月24日  
+**作者**：王建葦  
+**當前版本**：2.1.0
