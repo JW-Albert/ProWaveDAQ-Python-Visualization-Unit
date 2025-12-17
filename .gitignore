@@ -209,3 +209,11 @@ __marimo__/
 
 *.csv
 output/
+
+# OVPN 連線設定檔（包含敏感資訊）
+connection_config.txt
+/tmp/imCloud_auto.ovpn
+/tmp/ovpn_auth_*.txt
+
+# macOS 系統檔案
+.DS_Store
