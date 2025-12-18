@@ -159,6 +159,13 @@
             
             <div class="form-group">
                 <label>
+                    <input type="checkbox" id="csvEnabled" checked>
+                    儲存 CSV 檔案
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label>
                     <input type="checkbox" id="sqlEnabled" onchange="toggleSqlSettings()">
                     啟用 SQL 伺服器上傳
                 </label>
@@ -409,9 +416,11 @@
                 return;
             }
 
+            const csvEnabled = document.getElementById('csvEnabled').checked;
             const sqlEnabled = document.getElementById('sqlEnabled').checked;
             const requestData = {
-                label: label
+                label: label,
+                csv_enabled: csvEnabled
             };
 
             // 如果啟用 SQL，根據模式決定是否傳送設定
