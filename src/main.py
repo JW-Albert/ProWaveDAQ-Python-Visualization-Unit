@@ -406,6 +406,7 @@ def start_collection():
     try:
         data = request.get_json()
         label = data.get('label', '') if data else ''
+        csv_enabled = data.get('csv_enabled', True) if data else True  # 預設為啟用
 
         if not label:
             return jsonify({'success': False, 'message': '請提供資料標籤'})
@@ -484,7 +485,10 @@ def start_collection():
         output_path = os.path.join(PROJECT_ROOT, "output", "ProWaveDAQ", folder)
         os.makedirs(output_path, exist_ok=True)
 
-        csv_writer_instance = CSVWriter(channels, output_path, label, sample_rate)
+        # 根據 csv_enabled 決定是否初始化 CSVWriter
+        csv_writer_instance = None
+        if csv_enabled:
+            csv_writer_instance = CSVWriter(channels, output_path, label, sample_rate)
 
         # 初始化 SQL 上傳相關變數
         sql_uploader_instance = None
@@ -524,10 +528,11 @@ def start_collection():
 
         daq_instance.start_reading()
 
+        csv_status = '' if csv_enabled else ', CSV 儲存: 已停用'
         sql_status = f', SQL 上傳間隔: {sql_upload_interval} 秒' if sql_enabled else ''
         return jsonify({
             'success': True,
-            'message': f'資料收集已啟動 (取樣率: {sample_rate} Hz, 分檔間隔: {save_unit} 秒{sql_status})'
+            'message': f'資料收集已啟動 (取樣率: {sample_rate} Hz, 分檔間隔: {save_unit} 秒{csv_status}{sql_status})'
         })
 
     except Exception as e:
@@ -947,7 +952,7 @@ def collection_loop():
     此函數是整個系統的核心資料處理迴圈，負責：
     1. 從 DAQ 設備讀取資料（非阻塞方式）
     2. 更新即時顯示緩衝區（智慧緩衝區更新機制）
-    3. 將資料寫入 CSV 檔案（自動分檔，確保樣本邊界）
+    3. 將資料寫入 CSV 檔案（自動分檔，確保樣本邊界，如果啟用）
     4. 將資料上傳至 SQL 伺服器（如果啟用，獨立緩衝區）
     
     資料流程：
@@ -963,6 +968,7 @@ def collection_loop():
         - 此函數在背景執行緒中執行，不會阻塞主執行緒
         - 使用非阻塞方式從 DAQ 取得資料，避免長時間等待
         - 每次處理後會短暫休息（10ms），避免 CPU 過載
+        - CSV 寫入是可選的，如果 csv_writer_instance 為 None，則跳過 CSV 寫入
     """
     global is_collecting, daq_instance, csv_writer_instance, sql_uploader_instance
     global target_size, current_data_size, sql_target_size, sql_current_data_size, sql_enabled
@@ -970,6 +976,14 @@ def collection_loop():
     global sql_current_temp_file, sql_temp_dir
     
     channels = 3
+    
+    # 從 DAQ 取得取樣率（如果 CSV writer 不存在）
+    sample_rate = 7812  # 預設值
+    if daq_instance:
+        try:
+            sample_rate = daq_instance.get_sample_rate()
+        except:
+            pass
     
     # 初始化 SQL 樣本計數和起始時間
     if sql_enabled and sql_start_time is None:
@@ -1002,7 +1016,7 @@ def collection_loop():
                             csv_writer_instance.update_filename()
                             
                             if sql_uploader_instance and sql_enabled:
-                                csv_filename = csv_writer_instance.get_current_filename()
+                                csv_filename = csv_writer_instance.get_current_filename() if csv_writer_instance else None
                                 if csv_filename:
                                     if sql_uploader_instance.create_table(csv_filename):
                                         info(f"SQL 表已建立，對應 CSV: {csv_filename}")
@@ -1031,7 +1045,15 @@ def collection_loop():
                     
                     # 寫入暫存檔案
                     if sql_start_time is not None:
-                        sample_rate = csv_writer_instance.sample_rate if csv_writer_instance else 7812
+                        # 如果 CSV writer 不存在，使用 DAQ 的取樣率或預設值
+                        if csv_writer_instance:
+                            sample_rate = csv_writer_instance.sample_rate
+                        else:
+                            # 從 DAQ 取得取樣率
+                            try:
+                                sample_rate = daq_instance.get_sample_rate() if daq_instance else 7812
+                            except:
+                                sample_rate = 7812
                         channels = 3
                         
                         # 處理資料寫入，確保不超過目標值
