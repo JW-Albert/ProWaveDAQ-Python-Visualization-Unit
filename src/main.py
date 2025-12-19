@@ -75,6 +75,7 @@ def update_realtime_data(data: List[float]) -> None:
     - 僅在有活躍前端連線時更新即時資料緩衝區，節省 CPU 和記憶體資源
     - 無活躍連線時跳過緩衝區更新，但計數器仍正常更新
     - 資料點計數器始終更新，用於狀態顯示
+    - 限制緩衝區大小為 10 秒的資料量（7812 Hz × 3 通道 × 10 秒 = 234,360 個點）
     
     Args:
         data: 要添加的資料列表，格式為 [X1, Y1, Z1, X2, Y2, Z2, ...]
@@ -82,6 +83,7 @@ def update_realtime_data(data: List[float]) -> None:
     注意：
         - 使用執行緒鎖確保資料一致性
         - 活躍連線判斷：5 秒內有 /data API 請求視為活躍
+        - 緩衝區限制：保留最近 10 秒的資料（234,360 個資料點）
     """
     global realtime_data, data_counter, last_data_request_time
     
@@ -91,6 +93,11 @@ def update_realtime_data(data: List[float]) -> None:
     with data_lock:
         if has_active_connection:
             realtime_data.extend(data)
+            # 限制緩衝區大小為 10 秒的資料量（7812 Hz × 3 通道 × 10 秒 = 234,360 個點）
+            MAX_REALTIME_DATA_POINTS = 234360  # 10 秒的資料點數
+            if len(realtime_data) > MAX_REALTIME_DATA_POINTS:
+                # 只保留最近 10 秒的資料
+                realtime_data = realtime_data[-MAX_REALTIME_DATA_POINTS:]
         data_counter += len(data)
 
 

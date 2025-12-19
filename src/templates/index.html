@@ -156,34 +156,38 @@
                 <label for="labelInput">資料標籤 (Label):</label>
                 <input type="text" id="labelInput" placeholder="請輸入資料標籤">
             </div>
-            
+
             <div class="form-group">
                 <label>
                     <input type="checkbox" id="csvEnabled" checked>
                     儲存 CSV 檔案
                 </label>
             </div>
-            
+
             <div class="form-group">
                 <label>
                     <input type="checkbox" id="sqlEnabled" onchange="toggleSqlSettings()">
                     啟用 SQL 伺服器上傳
                 </label>
             </div>
-            
-            <div id="sqlSettings" style="display: none; padding: 15px; background-color: #f9f9f9; border-radius: 4px; margin-top: 10px;">
+
+            <div id="sqlSettings"
+                style="display: none; padding: 15px; background-color: #f9f9f9; border-radius: 4px; margin-top: 10px;">
                 <h3 style="margin-top: 0;">SQL 伺服器設定</h3>
                 <div class="form-group">
                     <label>
-                        <input type="radio" name="sqlConfigMode" id="sqlUseIni" value="ini" checked onchange="toggleSqlConfigMode()">
+                        <input type="radio" name="sqlConfigMode" id="sqlUseIni" value="ini" checked
+                            onchange="toggleSqlConfigMode()">
                         使用 INI 檔案設定
                     </label>
                     <label style="margin-left: 20px;">
-                        <input type="radio" name="sqlConfigMode" id="sqlUseManual" value="manual" onchange="toggleSqlConfigMode()">
+                        <input type="radio" name="sqlConfigMode" id="sqlUseManual" value="manual"
+                            onchange="toggleSqlConfigMode()">
                         手動輸入設定
                     </label>
                 </div>
-                <div id="sqlIniInfo" style="padding: 10px; background-color: #e7f3ff; border-radius: 4px; margin-bottom: 10px;">
+                <div id="sqlIniInfo"
+                    style="padding: 10px; background-color: #e7f3ff; border-radius: 4px; margin-bottom: 10px;">
                     <strong>使用 INI 檔案設定：</strong><br>
                     <span id="sqlIniConfigText">載入中...</span><br>
                     <small>可在「設定檔管理」頁面修改 Master.ini 中的 [SQLServer] 區段</small>
@@ -211,7 +215,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="form-group">
                 <button class="btn btn-start" id="startBtn" onclick="startCollection()">開始讀取</button>
                 <button class="btn btn-stop" id="stopBtn" onclick="stopCollection()" disabled>停止讀取</button>
@@ -327,13 +331,13 @@
                         chart.data.datasets[1].data = channel2;
                         chart.data.datasets[2].data = channel3;
 
-                        // 限制資料點數量以保持效能（保留最近5000個點）
-                        if (chart.data.labels.length > 5000) {
-                            const keep = 5000;
-                            chart.data.labels = chart.data.labels.slice(-keep);
-                            chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-keep);
-                            chart.data.datasets[1].data = chart.data.datasets[1].data.slice(-keep);
-                            chart.data.datasets[2].data = chart.data.datasets[2].data.slice(-keep);
+                        // 限制資料點數量以保持效能（保留最近10秒的資料，7812 Hz × 10 秒 = 78120 個點）
+                        const maxPoints = 78120; // 10 秒的資料點數
+                        if (chart.data.labels.length > maxPoints) {
+                            chart.data.labels = chart.data.labels.slice(-maxPoints);
+                            chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-maxPoints);
+                            chart.data.datasets[1].data = chart.data.datasets[1].data.slice(-maxPoints);
+                            chart.data.datasets[2].data = chart.data.datasets[2].data.slice(-maxPoints);
                         }
 
                         chart.update('none'); // 'none' 模式以提升效能
@@ -357,7 +361,7 @@
                     if (data.success && data.sql_config) {
                         sqlConfigFromIni = data.sql_config;
                         updateSqlIniInfo();
-                        
+
                         // 如果 INI 設定啟用 SQL，自動勾選
                         if (sqlConfigFromIni.enabled) {
                             document.getElementById('sqlEnabled').checked = true;
@@ -373,14 +377,14 @@
         // 更新 INI 設定顯示
         function updateSqlIniInfo() {
             if (!sqlConfigFromIni) return;
-            
+
             const infoText = document.getElementById('sqlIniConfigText');
             if (sqlConfigFromIni.enabled) {
                 infoText.innerHTML = `已啟用 | ${sqlConfigFromIni.host}:${sqlConfigFromIni.port} | 使用者: ${sqlConfigFromIni.user} | 資料庫: ${sqlConfigFromIni.database}`;
             } else {
                 infoText.innerHTML = '未啟用（可在 INI 檔案中設定 enabled = true）';
             }
-            
+
             // 將 INI 設定值填入手動輸入欄位作為預設值
             if (sqlConfigFromIni) {
                 document.getElementById('sqlHost').value = sqlConfigFromIni.host || 'localhost';
@@ -403,7 +407,7 @@
             const useIni = document.getElementById('sqlUseIni').checked;
             const iniInfo = document.getElementById('sqlIniInfo');
             const manualSettings = document.getElementById('sqlManualSettings');
-            
+
             iniInfo.style.display = useIni ? 'block' : 'none';
             manualSettings.style.display = useIni ? 'none' : 'block';
         }
@@ -426,7 +430,7 @@
             // 如果啟用 SQL，根據模式決定是否傳送設定
             if (sqlEnabled) {
                 const useIni = document.getElementById('sqlUseIni').checked;
-                
+
                 if (useIni) {
                     // 使用 INI 設定：只傳送 sql_enabled，讓後端使用 INI 設定
                     requestData.sql_enabled = true;
