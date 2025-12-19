@@ -37,7 +37,7 @@ os.chdir(PROJECT_ROOT)
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-app = Flask(__name__, template_folder='templates')
+app = Flask(__name__, template_folder='templates', static_folder='static')
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 realtime_data: List[float] = []
@@ -253,7 +253,7 @@ def get_sql_config():
 @app.route('/config', methods=['GET', 'POST'])
 def config():
     """
-    顯示與修改設定檔（ProWaveDAQ.ini、Master.ini、sql.ini）
+    顯示與修改設定檔（ProWaveDAQ.ini、csv.ini、sql.ini）
     
     GET 請求：
         讀取三個設定檔的內容並顯示在編輯頁面（固定輸入框模式）。
@@ -271,7 +271,7 @@ def config():
     """
     ini_dir = "API"
     prodaq_ini = os.path.join(ini_dir, "ProWaveDAQ.ini")
-    master_ini = os.path.join(ini_dir, "Master.ini")
+    csv_ini = os.path.join(ini_dir, "csv.ini")
     sql_ini = os.path.join(ini_dir, "sql.ini")
 
     if request.method == 'POST':
@@ -287,20 +287,21 @@ def config():
             prodaq_config.set('ProWaveDAQ', 'sampleRate', request.form.get('prodaq_sampleRate', '7812'))
             prodaq_config.set('ProWaveDAQ', 'slaveID', request.form.get('prodaq_slaveID', '1'))
 
-            # 讀取 Master.ini 設定
-            master_config = configparser.ConfigParser()
-            master_config.read(master_ini, encoding='utf-8')
-            if not master_config.has_section('SaveUnit'):
-                master_config.add_section('SaveUnit')
+            # 讀取 csv.ini 設定
+            csv_config = configparser.ConfigParser()
+            csv_config.read(csv_ini, encoding='utf-8')
+            if not csv_config.has_section('DumpUnit'):
+                csv_config.add_section('DumpUnit')
             
-            master_config.set('SaveUnit', 'second', request.form.get('master_second', '600'))
-            master_config.set('SaveUnit', 'sql_upload_interval', request.form.get('master_sql_upload_interval', '600'))
+            csv_config.set('DumpUnit', 'second', request.form.get('csv_second', '60'))
 
             # 讀取 sql.ini 設定
             sql_config = configparser.ConfigParser()
             sql_config.read(sql_ini, encoding='utf-8')
             if not sql_config.has_section('SQLServer'):
                 sql_config.add_section('SQLServer')
+            if not sql_config.has_section('DumpUnit'):
+                sql_config.add_section('DumpUnit')
             
             sql_config.set('SQLServer', 'enabled', request.form.get('sql_enabled', 'false'))
             sql_config.set('SQLServer', 'host', request.form.get('sql_host', 'localhost'))
@@ -308,13 +309,14 @@ def config():
             sql_config.set('SQLServer', 'user', request.form.get('sql_user', 'root'))
             sql_config.set('SQLServer', 'password', request.form.get('sql_password', ''))
             sql_config.set('SQLServer', 'database', request.form.get('sql_database', 'prowavedaq'))
+            sql_config.set('DumpUnit', 'second', request.form.get('sql_second', '600'))
 
             # 寫入檔案
             with open(prodaq_ini, 'w', encoding='utf-8') as f:
                 prodaq_config.write(f)
             
-            with open(master_ini, 'w', encoding='utf-8') as f:
-                master_config.write(f)
+            with open(csv_ini, 'w', encoding='utf-8') as f:
+                csv_config.write(f)
             
             with open(sql_ini, 'w', encoding='utf-8') as f:
                 sql_config.write(f)
@@ -337,16 +339,15 @@ def config():
         'slaveID': prodaq_config.get('ProWaveDAQ', 'slaveID', fallback='1')
     }
 
-    # 讀取 Master.ini
-    master_config = configparser.ConfigParser()
+    # 讀取 csv.ini
+    csv_config = configparser.ConfigParser()
     try:
-        master_config.read(master_ini, encoding='utf-8')
+        csv_config.read(csv_ini, encoding='utf-8')
     except:
         pass
     
-    master_data = {
-        'second': master_config.get('SaveUnit', 'second', fallback='600'),
-        'sql_upload_interval': master_config.get('SaveUnit', 'sql_upload_interval', fallback='600')
+    csv_data = {
+        'second': csv_config.get('DumpUnit', 'second', fallback='600')
     }
 
     # 讀取 sql.ini
@@ -362,12 +363,13 @@ def config():
         'port': sql_config_parser.get('SQLServer', 'port', fallback='3306'),
         'user': sql_config_parser.get('SQLServer', 'user', fallback='root'),
         'password': sql_config_parser.get('SQLServer', 'password', fallback=''),
-        'database': sql_config_parser.get('SQLServer', 'database', fallback='prowavedaq')
+        'database': sql_config_parser.get('SQLServer', 'database', fallback='prowavedaq'),
+        'sql_second': sql_config_parser.get('DumpUnit', 'second', fallback='600')
     }
 
     return render_template('config.html',
                            prodaq_data=prodaq_data,
-                           master_data=master_data,
+                           csv_data=csv_data,
                            sql_data=sql_data)
 
 
@@ -378,7 +380,7 @@ def start_collection():
     
     此函數會：
     1. 驗證請求參數（label 必須提供）
-    2. 載入設定檔（Master.ini、ProWaveDAQ.ini、sql.ini）
+    2. 載入設定檔（csv.ini、ProWaveDAQ.ini、sql.ini）
     3. 初始化 DAQ 設備並建立 Modbus 連線
     4. 計算 CSV 分檔和 SQL 上傳的目標大小
     5. 建立輸出目錄並初始化 CSV Writer
@@ -429,21 +431,26 @@ def start_collection():
             sql_sample_count = 0
             sql_start_time = None
 
-        ini_file_path = "API/Master.ini"
-        config = configparser.ConfigParser()
-        config.read(ini_file_path, encoding='utf-8')
+        # 讀取 csv.ini 設定
+        csv_ini_path = "API/csv.ini"
+        csv_config = configparser.ConfigParser()
+        csv_config.read(csv_ini_path, encoding='utf-8')
 
-        if not config.has_section('SaveUnit'):
-            return jsonify({'success': False, 'message': '無法讀取 Master.ini'})
+        if not csv_config.has_section('DumpUnit'):
+            return jsonify({'success': False, 'message': '無法讀取 csv.ini'})
 
-        save_unit = config.getint('SaveUnit', 'second', fallback=5)
-        sql_upload_interval = config.getint('SaveUnit', 'sql_upload_interval', fallback=0)
-        if sql_upload_interval <= 0:
-            sql_upload_interval = save_unit
+        save_unit = csv_config.getint('DumpUnit', 'second', fallback=5)
 
+        # 讀取 sql.ini 設定（SQL 上傳間隔）
         sql_ini_file_path = "API/sql.ini"
         sql_config_parser = configparser.ConfigParser()
         sql_config_parser.read(sql_ini_file_path, encoding='utf-8')
+        
+        sql_upload_interval = 0
+        if sql_config_parser.has_section('DumpUnit'):
+            sql_upload_interval = sql_config_parser.getint('DumpUnit', 'second', fallback=0)
+        if sql_upload_interval <= 0:
+            sql_upload_interval = save_unit
         
         sql_enabled_ini = False
         sql_config_ini = {

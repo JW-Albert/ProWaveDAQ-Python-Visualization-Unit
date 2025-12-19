@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ProWaveDAQ 即時資料可視化系統</title>
+    <link rel="icon" type="image/jpeg" href="{{ url_for('static', filename='imCloud.jpg') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <style>
         body {
@@ -166,13 +167,6 @@
 
             <div class="form-group">
                 <label>
-                    <input type="checkbox" id="csvEnabled" checked>
-                    儲存 CSV 檔案
-                </label>
-            </div>
-            
-            <div class="form-group">
-                <label>
                     <input type="checkbox" id="sqlEnabled" onchange="toggleSqlSettings()">
                     啟用 SQL 伺服器上傳
                 </label>
@@ -197,7 +191,7 @@
                     style="padding: 10px; background-color: #e7f3ff; border-radius: 4px; margin-bottom: 10px;">
                     <strong>使用 INI 檔案設定：</strong><br>
                     <span id="sqlIniConfigText">載入中...</span><br>
-                    <small>可在「設定檔管理」頁面修改 Master.ini 中的 [SQLServer] 區段</small>
+                    <small>可在「設定檔管理」頁面修改 sql.ini 中的 [SQLServer] 區段</small>
                 </div>
                 <div id="sqlManualSettings" style="display: none;">
                     <div class="form-group">

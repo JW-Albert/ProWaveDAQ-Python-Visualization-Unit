@@ -5,11 +5,11 @@
 ProWaveDAQ 即時資料可視化系統是一個基於 Python 的振動數據採集與可視化平台，用於從 **ProWaveDAQ**（Modbus RTU）設備取得振動數據，並在瀏覽器中即時顯示所有資料點的連續曲線，同時自動進行 CSV 儲存和 SQL 資料庫上傳。
 
 本系統提供完整的 Web 介面，讓使用者可以透過瀏覽器操作，不需進入終端機，即可：
-- 修改設定檔（`ProWaveDAQ.ini`、`Master.ini`、`sql.ini`）
+- 修改設定檔（`ProWaveDAQ.ini`、`csv.ini`、`sql.ini`）
 - 輸入資料標籤（Label）
 - 設定 SQL 伺服器上傳（可選）
 - 按下「開始讀取」即啟動採集與即時顯示
-- 系統同時自動分檔儲存資料（根據 `Master.ini` 的秒數）
+- 系統同時自動分檔儲存資料（根據 `csv.ini` 的秒數）
 - 按下「停止」即可安全結束，並自動上傳剩餘資料
 
 ## 功能特性
@@ -112,8 +112,8 @@ newgrp dialout
 ### 5. 確認設定檔
 檢查 `API/` 目錄下的設定檔：
 - `API/ProWaveDAQ.ini` - ProWaveDAQ 設備設定
-- `API/Master.ini` - CSV 和 SQL 上傳間隔設定
-- `API/sql.ini` - SQL 伺服器連線設定
+- `API/csv.ini` - CSV 分檔間隔設定
+- `API/sql.ini` - SQL 伺服器連線設定和上傳間隔設定
 
 ### 6. 設定 SQL 資料庫（可選）
 如果啟用 SQL 上傳功能，需要在 MariaDB/MySQL 中建立資料表：
@@ -132,6 +132,66 @@ CREATE TABLE IF NOT EXISTS vibration_data (
 ```
 
 **注意**：如果資料表不存在，程式會在首次連線時自動建立。
+
+### 7. 設定 OpenVPN 連線（如需連線至 IMSL 實驗室 MariaDB 伺服器）
+
+**背景說明**：
+由於逢甲大學防火牆政策，如需連線至 IMSL 實驗室的 MariaDB 伺服器，需要透過 OpenVPN 建立 VPN 連線。
+
+**安裝 OpenVPN**（如果尚未安裝）：
+```bash
+sudo apt-get update
+sudo apt-get install openvpn
+```
+
+**設定 OpenVPN 連線**：
+
+1. **首次設定連線資訊**：
+   ```bash
+   ./connection.sh --setup
+   ```
+   腳本會提示輸入：
+   - 私鑰密碼（Private Key Password）
+   - OVPN 帳號（Username）
+   - OVPN 密碼（Password）
+   - OVPN 伺服器位址（可選）
+
+2. **確認 OVPN 設定檔存在**：
+   - 確保 `API/imCloud.ovpn` 檔案存在
+   - 如果不存在，腳本會建立基本設定檔，需要手動編輯以添加完整設定
+
+3. **建立 OpenVPN 連線**：
+   ```bash
+   ./connection.sh
+   ```
+   或使用 sudo 權限：
+   ```bash
+   sudo ./connection.sh
+   ```
+
+4. **檢查連線狀態**：
+   ```bash
+   # 檢查 OpenVPN 程序是否運行
+   pgrep -x openvpn
+   
+   # 查看連線狀態
+   ip addr show tun0
+   ```
+
+5. **中斷連線**：
+   ```bash
+   ./connection.sh --disconnect
+   ```
+   或：
+   ```bash
+   sudo killall openvpn
+   ```
+
+**重要提示**：
+- 連線資訊會儲存在 `API/connection_config.txt`（權限 600，僅擁有者可讀寫）
+- 請勿將 `API/connection_config.txt` 和 `API/imCloud.ovpn` 提交到版本控制系統
+- 建議將這些檔案加入 `.gitignore`
+- 連線成功後，即可正常使用 SQL 上傳功能連線至 IMSL 實驗室的 MariaDB 伺服器
 
 ## 使用說明
 
@@ -229,7 +289,7 @@ Press Ctrl+C to stop the server
 7. **管理設定檔**
    - 點擊「設定檔管理」連結
    - 使用固定輸入框編輯設定檔（防止誤刪參數）
-   - 可以編輯 `ProWaveDAQ.ini`、`Master.ini` 和 `sql.ini`
+   - 可以編輯 `ProWaveDAQ.ini`、`csv.ini` 和 `sql.ini`
    - 修改後點擊「儲存設定檔」
 
 8. **瀏覽和下載檔案**
@@ -250,25 +310,19 @@ sampleRate = 7812            # 取樣率（Hz）
 slaveID = 1                  # Modbus 從站 ID
 ```
 
-#### Master.ini
+#### csv.ini
 ```ini
-[SaveUnit]
-second = 600                 # 每個 CSV 檔案的資料時間長度（秒）
-sql_upload_interval = 600    # SQL 上傳間隔（秒），運作方式與 second 相同
+[CSVServer]
+enabled = false
+
+[DumpUnit]
+second = 60                  # 每個 CSV 檔案的資料時間長度（秒）
 ```
 
 **分檔邏輯說明**：
 - 系統會根據 `sampleRate × channels × second` 計算每個 CSV 檔案應包含的資料點數
 - 當累積的資料點數達到目標值時，自動建立新檔案
-- 例如：取樣率 7812 Hz，3 通道，600 秒 → 每個檔案約 14,061,600 個資料點
-
-**SQL 上傳邏輯說明**：
-- SQL 上傳採用暫存檔案機制，資料先寫入暫存 CSV 檔案
-- 系統會建立暫存檔案目錄（`.sql_temp`），檔案命名格式：`{timestamp}_sql_temp.csv`
-- 每 `sql_upload_interval` 秒定時檢查並上傳暫存檔案
-- 上傳成功後自動刪除暫存檔案，並立即建立新暫存檔案（避免資料溢出）
-- 停止時會檢查並上傳所有剩餘暫存檔案
-- 例如：取樣率 7812 Hz，3 通道，600 秒 → 每 600 秒上傳一次暫存檔案
+- 例如：取樣率 7812 Hz，3 通道，60 秒 → 每個檔案約 1,406,160 個資料點
 
 #### sql.ini
 ```ini
@@ -279,12 +333,24 @@ port = 3306                 # 連接埠
 user = raspberrypi          # 使用者名稱
 password = Raspberry@Pi     # 密碼
 database = daq-data         # 資料庫名稱
+
+[DumpUnit]
+second = 5                  # SQL 上傳間隔（秒），運作方式與 CSV 的 second 相同
 ```
 
 **SQL 設定說明**：
 - `enabled`：控制是否啟用 SQL 上傳功能
 - 如果 `enabled = true`，前端會自動勾選「啟用 SQL 伺服器上傳」
 - 前端可以選擇使用 INI 設定或手動輸入（覆蓋 INI 設定）
+- **重要**：如果連線至 IMSL 實驗室的 MariaDB 伺服器，由於逢甲大學防火牆政策，需要先透過 `connection.sh` 建立 OpenVPN 連線（詳見「設定 OpenVPN 連線」章節）
+
+**SQL 上傳邏輯說明**：
+- SQL 上傳採用暫存檔案機制，資料先寫入暫存 CSV 檔案
+- 系統會建立暫存檔案目錄（`.sql_temp`），檔案命名格式：`{timestamp}_sql_temp.csv`
+- 每 `second` 秒定時檢查並上傳暫存檔案
+- 上傳成功後自動刪除暫存檔案，並立即建立新暫存檔案（避免資料溢出）
+- 停止時會檢查並上傳所有剩餘暫存檔案
+- 例如：取樣率 7812 Hz，3 通道，5 秒 → 每 5 秒上傳一次暫存檔案
 
 ### 輸出檔案
 
@@ -323,8 +389,12 @@ ProWaveDAQ_Python_Visualization_Unit/
 │
 ├── API/
 │   ├── ProWaveDAQ.ini      # ProWaveDAQ 設備設定檔
-│   ├── Master.ini           # CSV 和 SQL 上傳間隔設定檔
-│   └── sql.ini              # SQL 伺服器連線設定檔
+│   ├── csv.ini              # CSV 分檔間隔設定檔
+│   ├── sql.ini              # SQL 伺服器連線設定檔和上傳間隔設定檔
+│   ├── imCloud.ovpn         # OpenVPN 連線設定檔（用於連線至 IMSL 實驗室）
+│   └── connection_config.txt # OpenVPN 連線資訊設定檔（自動產生，請勿提交到版本控制）
+│
+├── connection.sh            # OpenVPN 連線腳本（用於連線至 IMSL 實驗室 MariaDB 伺服器）
 │
 ├── output/
 │   └── ProWaveDAQ/         # CSV 輸出目錄
@@ -358,7 +428,7 @@ ProWaveDAQ_Python_Visualization_Unit/
 | `/data` | GET | 回傳目前最新資料 JSON 給前端 |
 | `/status` | GET | 檢查資料收集狀態 |
 | `/sql_config` | GET | 取得 SQL 設定（從 sql.ini） |
-| `/config` | GET | 顯示設定檔編輯頁面（固定輸入框） |
+| `/config` | GET | 顯示設定檔編輯頁面（固定輸入框，包含 ProWaveDAQ.ini、csv.ini、sql.ini） |
 | `/config` | POST | 儲存修改後的設定檔 |
 | `/start` | POST | 啟動 DAQ、CSVWriter、SQLUploader 與即時顯示 |
 | `/stop` | POST | 停止所有執行緒、安全關閉，並上傳剩餘資料 |
@@ -657,11 +727,20 @@ output/ProWaveDAQ/{timestamp}_{label}/
 
 **解決方法**：
 - 檢查 `sql.ini` 中的連線設定是否正確
-- 確認 SQL 伺服器是否可連線（測試：`mysql -h <host> -P <port> -u <user> -p`）
-- 檢查資料庫是否存在
-- 確認使用者權限是否足夠（CREATE TABLE、INSERT）
-- 查看終端機的錯誤訊息
-- 檢查網路連線（特別是跨網段時）
+- **如果連線至 IMSL 實驗室 MariaDB 伺服器**：
+  - 確認 OpenVPN 連線已建立（執行 `./connection.sh`）
+  - 檢查 OpenVPN 連線狀態：`pgrep -x openvpn`
+  - 確認 VPN 連線正常：`ip addr show tun0`
+  - 如果連線失敗，檢查：
+    - `API/imCloud.ovpn` 檔案是否存在且正確
+    - `API/connection_config.txt` 中的連線資訊是否正確
+    - 執行 `./connection.sh --setup` 重新設定連線資訊
+- **一般連線問題**：
+  - 確認 SQL 伺服器是否可連線（測試：`mysql -h <host> -P <port> -u <user> -p`）
+  - 檢查資料庫是否存在
+  - 確認使用者權限是否足夠（CREATE TABLE、INSERT）
+  - 查看終端機的錯誤訊息
+  - 檢查網路連線（特別是跨網段時）
 
 #### 6. 資料採集停止
 **症狀**：資料採集中途停止
@@ -921,6 +1000,22 @@ collection_loop() [背景執行緒]
 
 ## 更新日誌
 
+### Version 5.0.0
+- **重大更新**：移除 Master.ini，改用 csv.ini 和 sql.ini
+  - 將 Master.ini 的功能拆分為兩個獨立的設定檔
+  - csv.ini：包含 CSV 分檔間隔設定（[DumpUnit] 區段的 `second` 參數）
+  - sql.ini：包含 SQL 上傳間隔設定（[DumpUnit] 區段的 `second` 參數）
+  - 統一命名規則：兩個設定檔都使用 `second` 作為參數名稱
+  - 前端設定頁面更新：移除 Master.ini 區段，新增 csv.ini 區段
+  - 所有功能保持不變，僅改變設定檔結構
+- **改進**：統一表單欄位命名規則
+  - CSV 分檔間隔欄位：`csv_second`
+  - SQL 上傳間隔欄位：`sql_second`
+  - 保持命名規則一致性
+- **新增**：網站 favicon 支援
+  - 所有頁面（index.html、config.html、files.html）都使用 imCloud.jpg 作為 favicon
+  - 使用 Flask 的 `url_for('static', filename='imCloud.jpg')` 正確載入
+
 ### Version 4.2.0
 - **改進**：前端顯示時間尺度設定為 10 秒
   - 前端圖表顯示最近 10 秒的資料（每個通道約 78,120 個資料點）
@@ -1067,6 +1162,6 @@ collection_loop() [背景執行緒]
 
 ---
 
-**最後更新**：2025年1月6日
+**最後更新**：2025年12月19日
 **作者**：王建葦  
-**當前版本**：4.2.0
+**當前版本**：5.0.0
