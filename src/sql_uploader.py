@@ -186,7 +186,7 @@ class SQLUploader:
             create_table_sql = f"""
             CREATE TABLE IF NOT EXISTS `{sanitized_table_name}` (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                timestamp DATETIME NOT NULL,
+                timestamp DATETIME(6) NOT NULL,
                 label VARCHAR(255) NOT NULL,
                 channel_1 DOUBLE NOT NULL,
                 channel_2 DOUBLE NOT NULL,
