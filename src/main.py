@@ -45,14 +45,14 @@ log.setLevel(logging.ERROR)
 # ==========================================
 
 # 1. 網頁顯示專用佇列 (Web Visualization Queue)
-web_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=10000)
+web_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000)
 
 # 2. 降頻比例 (Downsampling Ratio)
-WEB_DOWNSAMPLE_RATIO = 50
+WEB_DOWNSAMPLE_RATIO = 25
 
 # 3. 資料流佇列 (Raw Data Queues)
-csv_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=1000)
-sql_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=1000)
+csv_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000)
+sql_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000)
 
 # 4. 控制旗標與物件
 is_collecting = False
@@ -572,7 +572,6 @@ def finalize_upload():
                     pass
 
         except Exception as e:
-            error(f"停止時處理 SQL 暫存檔案發生錯誤: {e}")
 
     if csv_writer_instance:
         csv_writer_instance.close()
