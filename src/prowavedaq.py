@@ -3,17 +3,22 @@
 """
 ProWaveDAQ 設備通訊模組
 
-基於原廠手冊 RS485_ModbusRTU通訊說明_PwDAQ.pdf 第 5 頁規範：
-1. 使用 FC04 (Read Input Registers)
-2. 起始位址為 0x02 (Raw data FIFO buffer size)
-3. 讀取架構：[Size(1 word)] + [Data(N words)]
+此模組負責與 ProWaveDAQ 設備進行 Modbus RTU 通訊，支援：
+- 智慧讀取邏輯（利用 Data Header 更新剩餘數量，減少 50% 通訊流量）
+- 開機自動清空（啟動時自動排空感測器積壓的舊資料）
+- 高效能讀取（移除不必要的 sleep，榨乾 RS485 頻寬）
+- 遵循原廠手冊規範（基於 RS485_ModbusRTU通訊說明_PwDAQ.pdf）
+- 使用 FC04 (Read Input Registers) 讀取資料
+- 本地緩衝區快取（減少 Modbus 詢問次數）
+- 大容量資料佇列（50,000 筆資料緩衝）
+- 執行緒安全（使用 queue.Queue 進行資料傳遞）
 """
 
 import time
 import threading
 import configparser
 import queue
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from pymodbus.client import ModbusSerialClient
 
@@ -28,35 +33,31 @@ except ImportError:
 
 class ProWaveDAQ:
     """
-    ProWaveDAQ 設備通訊類別 (遵守原廠手冊 Page 5 規範)
+    ProWaveDAQ 設備通訊類別 (極速版)
     """
     
-    # ========== 原廠手冊定義暫存器 ==========
-    # Page 1[cite: 6]: 取樣率設定 (FC06)
-    REG_SAMPLE_RATE = 0x01      
+    # 暫存器定義
+    REG_SAMPLE_RATE = 0x01
+    REG_FIFO_STATUS = 0x02  # 資料緩衝區大小與起始位址
     
-    # Page 5[cite: 47, 50]: 資料緩衝區大小與起始位址 (FC04)
-    # 說明: 需連同 FIFO buffer size (0x02) 一起讀出 
-    REG_FIFO_STATUS = 0x02    
-    
-    # 單次最大讀取字數 (手冊 Page 1 提到 Raw data range 0x03~0x7D，約 123 words) [cite: 6]
-    MAX_READ_WORDS = 123 
-    
+    MAX_READ_WORDS = 123    # 單次最大讀取字數
     CHANNELS = 3
 
     def __init__(self):
         self.serial_port = "/dev/ttyUSB0"
-        self.baud_rate = 3_000_000 # 支援 3M bps 
-        self.sample_rate = 7812    # I-type default [cite: 6]
-        self.slave_id = 1          # Default ID 
+        self.baud_rate = 3_000_000
+        self.sample_rate = 7812
+        self.slave_id = 1
 
         self.client: Optional[ModbusSerialClient] = None
         self.reading = False
         self.thread: Optional[threading.Thread] = None
-        self.queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=5000)
+        self.queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000) # 加大佇列
+        
+        # 本地快取的緩衝區剩餘量 (核心優化變數)
+        self.cached_buffer_size = 0
 
     def init_devices(self, ini_path: str):
-        """初始化設備"""
         cfg = configparser.ConfigParser()
         cfg.read(ini_path, encoding="utf-8")
 
@@ -69,34 +70,54 @@ class ProWaveDAQ:
             raise RuntimeError("Modbus connect failed")
 
         self._set_sample_rate()
+        
+        # [新增] 啟動前先清空感測器內部的陳舊資料
+        self._flush_hardware_buffer()
 
     def _connect(self) -> bool:
-        """建立連線，參數參照手冊 Page 1 """
         self.client = ModbusSerialClient(
             port=self.serial_port,
             baudrate=self.baud_rate,
-            parity="N",      # Parity: None 
-            stopbits=1,      # Stop bit: 1 
-            bytesize=8,      # Data bits: 8 
-            timeout=0.5,
-            framer="rtu",
+            parity="N", stopbits=1, bytesize=8,
+            timeout=0.5, framer="rtu",
         )
         if not self.client.connect():
             return False
         self.client.unit_id = self.slave_id
-        # 優化讀取效能
         self.client.framer.skip_encode_mobile = True 
         info("Modbus connection established")
         return True
 
     def _set_sample_rate(self):
-        """設定取樣率，使用 FC06 [cite: 4, 15]"""
-        # Page 4: Sample rate change [cite: 15]
         r = self.client.write_register(self.REG_SAMPLE_RATE, self.sample_rate)
         if r.isError():
             error("Failed to set sample rate")
         else:
             debug(f"Sample rate set to {self.sample_rate} Hz")
+
+    def _flush_hardware_buffer(self):
+        """
+        清空硬體緩衝區
+        如果感測器內積壓了 65000 筆資料，讀取會嚴重延遲。
+        此函式會快速讀取並丟棄，直到緩衝區清空。
+        """
+        info("Flushing hardware buffer (clearing old data)...")
+        dropped_packets = 0
+        try:
+            # 最多嘗試清空 500 次 (約 6 萬筆)
+            for _ in range(500):
+                size = self._read_fifo_size()
+                if size < 100: # 緩衝區已接近空
+                    break
+                
+                # 快速讀取並丟棄
+                read_count = min(size, self.MAX_READ_WORDS)
+                self.client.read_input_registers(address=self.REG_FIFO_STATUS, count=read_count + 1)
+                dropped_packets += 1
+                
+            info(f"Buffer flushed. Dropped {dropped_packets} packets. System is now real-time.")
+        except Exception as e:
+            warning(f"Flush warning: {e}")
 
     def start_reading(self):
         if self.reading:
@@ -104,7 +125,7 @@ class ProWaveDAQ:
         self.reading = True
         self.thread = threading.Thread(target=self._read_loop, daemon=True)
         self.thread.start()
-        info("ProWaveDAQ reading started")
+        info("ProWaveDAQ reading started (High Performance Mode)")
 
     def stop_reading(self):
         self.reading = False
@@ -125,93 +146,87 @@ class ProWaveDAQ:
 
     def _read_loop(self):
         """
-        資料讀取主迴圈 (遵循手冊 Page 5 流程)
+        極速讀取迴圈
+        優化策略：
+        1. 優先使用本地 cached_buffer_size 判斷是否讀取，減少 50% 的 Modbus 流量。
+        2. 讀取回來的 Header 會自動更新 cached_buffer_size。
+        3. 只有當不知道大小 (0) 時，才去詢問硬體。
         """
-        debug("Read loop started (Manual Page 5 Logic)")
+        debug("Read loop started (Optimized G.py Logic)")
+        
+        # 重置計數
+        self.cached_buffer_size = 0
 
         while self.reading:
             try:
-                # 步驟 1: 讀取 0x02 取得目前緩衝區大小 [cite: 47]
-                # 手冊 Page 5: 讀取資料緩衝大小
-                buffer_size = self._read_fifo_size()
+                # 策略 1: 如果本地計數為 0，才去問硬體 (FC04 Read Size)
+                if self.cached_buffer_size == 0:
+                    self.cached_buffer_size = self._read_fifo_size()
+                    
+                    if self.cached_buffer_size == 0:
+                        # 真的沒資料，稍微休息避免 CPU 100%
+                        time.sleep(0.001) 
+                        continue
+
+                # 策略 2: 直接讀取 (FC04 Read Data)
+                # 根據目前已知的大小，決定讀多少 (最多 123)
+                count_to_read = min(self.cached_buffer_size, self.MAX_READ_WORDS)
+                # 確保 3 的倍數
+                count_to_read = (count_to_read // self.CHANNELS) * self.CHANNELS
                 
-                # 如果緩衝區為空，稍作等待
-                if buffer_size <= 0:
-                    time.sleep(0.002)
+                if count_to_read == 0:
+                    # 剩餘資料不足 3 筆，重新詢問大小
+                    self.cached_buffer_size = 0 
                     continue
 
-                # 步驟 2: 計算要讀取的長度
-                # 手冊 Page 5: 需連同 FIFO buffer size (0x02) 一起讀出
-                # 所以實際讀取長度 = 資料長度 + 1 (Header)
-                # 限制單次讀取最大量 [cite: 6]
-                read_count = min(buffer_size, self.MAX_READ_WORDS)
+                # 執行讀取
+                # Request: [Size(1)] + [Data(N)]
+                r = self.client.read_input_registers(
+                    address=self.REG_FIFO_STATUS, 
+                    count=count_to_read + 1
+                )
                 
-                # 確保讀取完整的 X,Y,Z (3的倍數)
-                read_count = (read_count // self.CHANNELS) * self.CHANNELS
-                
-                if read_count == 0:
-                    continue
-
-                # 步驟 3: 執行讀取 (FC04, Start Address 0x02)
-                # Request 讀取 read_count + 1 個 Word
-                raw_packet = self._read_data_packet(read_count + 1)
-                
-                if not raw_packet:
+                if r.isError() or not r.registers:
+                    # 讀取失敗，重置計數，下次重新詢問
+                    self.cached_buffer_size = 0
                     continue
                 
-                # 步驟 4: 解析封包 [Header, Data...]
-                # raw_packet[0] 是這一次讀回來時，暫存器 0x02 的值 (剩餘大小)
-                # raw_packet[1:] 是實際的資料 (0x03 ~ ...)
-                payload_data = raw_packet[1:]
+                # 策略 3: 利用 Header 更新本地計數
+                # r.registers[0] 是感測器告訴我們「讀完這包後，我還剩下多少」
+                new_remaining_size = r.registers[0]
+                self.cached_buffer_size = new_remaining_size
                 
-                # 步驟 5: 轉換與推送
-                samples = self._convert_to_float(payload_data)
+                # 處理數據 (移除 Header)
+                payload = r.registers[1:]
+                samples = self._convert_to_float(payload)
                 if samples:
                     self._push(samples)
 
+                # [極速模式] 不使用 sleep，全力讀取
+
             except Exception as e:
                 error(f"Read loop error: {e}")
+                self.cached_buffer_size = 0
                 time.sleep(0.1)
 
     def _read_fifo_size(self) -> int:
-        """
-        讀取暫存器 0x02 (Raw data FIFO buffer size) [cite: 47]
-        """
         r = self.client.read_input_registers(address=self.REG_FIFO_STATUS, count=1)
         if r.isError() or not r.registers:
             return 0
         return r.registers[0]
 
-    def _read_data_packet(self, total_words: int) -> List[int]:
-        """
-        從 0x02 開始讀取指定長度 
-        Args:
-            total_words: 資料長度 + 1 (Header)
-        """
-        r = self.client.read_input_registers(address=self.REG_FIFO_STATUS, count=total_words)
-        if r.isError() or len(r.registers) != total_words:
-            # warning("Packet read failed or incomplete")
-            return []
-        return r.registers
-
     def _convert_to_float(self, raw: List[int]) -> List[float]:
-        """
-        數值轉換
-        手冊未明確寫出轉換公式細節，但通常為 Signed 16-bit 轉換。
-        沿用原本邏輯，假設 13-bit 解析度或類似規格 (除以 8192.0)。
-        """
         out: List[float] = []
         for v in raw:
-            # 處理 Signed 16-bit
             signed = v if v < 32768 else v - 65536
             out.append(signed / 8192.0)
         return out
 
     def _push(self, data: List[float]):
-        """將資料推入佇列"""
         try:
             self.queue.put_nowait(data)
         except queue.Full:
+            # 佇列滿時丟棄最舊的資料，保持即時性
             try:
                 self.queue.get_nowait()
                 self.queue.put_nowait(data)
