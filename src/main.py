@@ -3,17 +3,7 @@
 """
 ProWaveDAQ 即時資料可視化系統 - 主控制程式
 
-此模組整合所有功能模組，提供完整的 Web 介面控制，支援：
-- Web 介面控制（使用 Flask 提供瀏覽器操作介面）
-- 即時資料可視化（使用 Chart.js 顯示多通道連續曲線圖）
-- 資料採集管理（整合 ProWaveDAQ 設備通訊）
-- CSV 自動儲存（根據設定檔自動分檔儲存資料）
-- SQL 資料庫上傳（可選的 MySQL/MariaDB 上傳功能）
-- 設定檔管理（透過 Web 介面編輯 ProWaveDAQ.ini、csv.ini、sql.ini）
-- 多執行緒架構（5 個獨立執行緒：Flask、DAQ Reading、Collection、CSV Writer、SQL Writer）
-- 執行緒安全通訊（使用 queue.Queue 進行執行緒間通訊）
-- 降頻佇列架構（web_data_queue 存儲降頻後的資料供前端使用）
-- 資料保護機制（重試機制、失敗保留，確保資料不遺失）
+整合所有功能模組，提供完整的 Web 介面控制、即時資料可視化和資料儲存功能。
 """
 
 import os
@@ -51,21 +41,11 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
-# ==========================================
-# 全域變數與資料結構 (優化核心)
-# ==========================================
-
-# 1. 網頁顯示專用佇列 (Web Visualization Queue)
+# 全域變數與資料結構
 web_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000)
-
-# 2. 降頻比例 (Downsampling Ratio)
 WEB_DOWNSAMPLE_RATIO = 25
-
-# 3. 資料流佇列 (Raw Data Queues)
 csv_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000)
 sql_data_queue: "queue.Queue[List[float]]" = queue.Queue(maxsize=50000)
-
-# 4. 控制旗標與物件
 is_collecting = False
 data_lock = threading.Lock()
 
@@ -95,14 +75,8 @@ sql_sample_count = 0
 sql_start_time: Optional[datetime] = None
 
 
-# ==========================================
-# 核心邏輯：資料更新與處理
-# ==========================================
-
 def update_realtime_data(data: List[float]) -> None:
-    """
-    更新即時資料 (針對 Web 顯示進行降頻處理)
-    """
+    """更新即時資料 (針對 Web 顯示進行降頻處理)"""
     global web_data_queue, WEB_DOWNSAMPLE_RATIO, data_counter
 
     if web_data_queue.full():
@@ -128,9 +102,7 @@ def update_realtime_data(data: List[float]) -> None:
     data_counter += len(data)
 
 
-# ==========================================
-# Flask 路由 (API)
-# ==========================================
+# Flask 路由
 
 @app.route("/")
 def index():
@@ -500,9 +472,7 @@ def download_file():
     except Exception as e:
         return jsonify({"success": False})
 
-# ==========================================
-# 背景工作函式 (Threads)
-# ==========================================
+# 背景工作函式
 
 def finalize_upload():
     """停止後的清理與剩餘資料上傳"""
@@ -893,9 +863,7 @@ def _upload_temp_file_if_needed():
         error(f"上傳暫存檔案時發生錯誤: {e}")
         return False
 
-# ==========================================
 # 主程式入口
-# ==========================================
 
 def run_flask_server(port: int = 8080):
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

@@ -3,12 +3,7 @@
 """
 SQL 上傳器模組
 
-此模組負責將振動數據上傳至 SQL 伺服器（MySQL/MariaDB），支援：
-- 動態建立資料表（表名與 CSV 檔名對應）
-- 批次插入資料（提升效能）
-- 自動重連機制
-- 重試機制和資料保護（失敗時保留資料）
-- 執行緒安全
+負責將振動數據上傳至 SQL 伺服器（MySQL/MariaDB），支援動態建立資料表和批次插入。
 """
 
 import time
@@ -45,32 +40,10 @@ if not PYMySQL_AVAILABLE and not MYSQL_CONNECTOR_AVAILABLE:
 
 
 class SQLUploader:
-    """
-    SQL 上傳器類別
-    
-    此類別負責將振動數據上傳至 SQL 伺服器，支援動態建立資料表和批次插入。
-    
-    使用方式：
-        uploader = SQLUploader(channels=3, label="test", sql_config={...})
-        uploader.create_table("20250101_test_001")
-        uploader.add_data_block([x1, y1, z1, x2, y2, z2, ...])
-        uploader.close()
-    """
+    """SQL 上傳器類別，支援動態建立資料表和批次插入"""
 
     def __init__(self, channels: int, label: str, sql_config: Dict[str, str]):
-        """
-        初始化 SQL 上傳器
-
-        Args:
-            channels: 通道數量
-            label: 標籤名稱
-            sql_config: SQL 伺服器設定字典，包含：
-                - host: 伺服器位置
-                - port: 連接埠
-                - user: 使用者名稱
-                - password: 密碼
-                - database: 資料庫名稱（可選）
-        """
+        """初始化 SQL 上傳器"""
         self.channels = channels
         self.label = label
         self.sql_config = sql_config
@@ -110,66 +83,29 @@ class SQLUploader:
             raise
 
     def _sanitize_table_name(self, table_name: str) -> str:
-        """
-        清理表名，確保符合 SQL 命名規範
-        
-        SQL 表名限制：
-        - 只能包含字母、數字、底線
-        - 不能以數字開頭
-        - 不能包含特殊字元
-        
-        Args:
-            table_name: 原始表名（通常與 CSV 檔名相同）
-        
-        Returns:
-            str: 清理後的表名，符合 SQL 命名規範
-        """
-        # 將不允許的字元替換為底線
-        # 保留字母、數字、底線
+        """清理表名，確保符合 SQL 命名規範"""
         import re
-        # 替換所有非字母、數字、底線的字元為底線
         sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', table_name)
-        # 確保不以數字開頭（如果以數字開頭，在前面加上 't_'）
         if sanitized and sanitized[0].isdigit():
             sanitized = 't_' + sanitized
-        # 確保表名不為空
         if not sanitized:
             sanitized = 'vibration_data'
         return sanitized
     
     def create_table(self, table_name: str) -> bool:
-        """
-        建立新的資料表（表名與 CSV 檔名對應）
-        
-        每次 CSV 分檔時，會呼叫此方法建立對應的 SQL 表。
-        表名會與 CSV 檔名一致（經過清理以符合 SQL 命名規範）。
-        
-        Args:
-            table_name: 表名（通常與 CSV 檔名相同，不含 .csv 後綴）
-        
-        Returns:
-            bool: 建立成功返回 True，失敗返回 False
-        
-        注意：
-            - 表名會自動清理以符合 SQL 命名規範
-            - 如果表已存在，不會報錯（使用 CREATE TABLE IF NOT EXISTS）
-            - 建立成功後會設定 current_table_name
-        """
+        """建立新的資料表（表名與 CSV 檔名對應）"""
         try:
-            # 清理表名以符合 SQL 命名規範
             sanitized_table_name = self._sanitize_table_name(table_name)
             
-            # 確保連線存在
             if not self.connection:
                 if not self._reconnect():
                     error("無法建立 SQL 表：連線失敗")
                     return False
             
-            # 檢查連線是否有效
             try:
                 if PYMySQL_AVAILABLE:
                     self.connection.ping(reconnect=True)
-                else:  # mysql.connector
+                else:
                     if not self.connection.is_connected():
                         if not self._reconnect():
                             return False
@@ -177,12 +113,9 @@ class SQLUploader:
                 if not self._reconnect():
                     return False
             
-            # 確保游標存在
             if not self.cursor:
                 self.cursor = self.connection.cursor()
             
-            # 建立資料表的 SQL（使用通用語法）
-            # 注意：表名使用清理後的名稱，但欄位中仍保留原始 label
             create_table_sql = f"""
             CREATE TABLE IF NOT EXISTS `{sanitized_table_name}` (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -198,8 +131,6 @@ class SQLUploader:
 
             self.cursor.execute(create_table_sql)
             self.connection.commit()
-            
-            # 設定當前表名
             self.current_table_name = sanitized_table_name
             self.is_connected = True
             info(f"SQL 資料表已建立: {sanitized_table_name} (對應 CSV: {table_name})")

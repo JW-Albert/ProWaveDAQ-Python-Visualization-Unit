@@ -6,7 +6,6 @@
 """
 import time
 from pymodbus.client import ModbusSerialClient
-import struct
 
 # ================= 設定區 =================
 PORT = "/dev/ttyUSB0"
