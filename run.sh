@@ -11,6 +11,8 @@ LOG_DIR="logs"
 RETENTION_DAYS=3  # 日誌保留天數，超過自動刪除
 # =========================================
 
+./connection.sh
+
 # 1. 設定 USB Latency
 if [ -e /sys/bus/usb-serial/devices/ttyUSB0/latency_timer ]; then
     sudo bash -c "echo 1 > /sys/bus/usb-serial/devices/ttyUSB0/latency_timer"
@@ -66,3 +68,5 @@ else
     # 使用 tee 同時輸出到螢幕與檔案
     python src/main.py --port ${PORT} 2>&1 | tee ${LOG_FILE}
 fi
+
+./connection.sh --disconnect
