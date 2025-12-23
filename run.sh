@@ -11,9 +11,11 @@ LOG_DIR="logs"
 RETENTION_DAYS=3  # 日誌保留天數，超過自動刪除
 # =========================================
 
+# 1. 連線 OVPN
+echo "連線 OVPN..."
 ./connection.sh
 
-# 1. 設定 USB Latency
+# 2. 設定 USB Latency
 if [ -e /sys/bus/usb-serial/devices/ttyUSB0/latency_timer ]; then
     sudo bash -c "echo 1 > /sys/bus/usb-serial/devices/ttyUSB0/latency_timer"
 else
@@ -21,7 +23,7 @@ else
     echo "警告: 未偵測到 ttyUSB0，略過 Latency 設定。"
 fi
 
-# 2. 參數處理
+# 3. 參數處理
 PORT=${1:-8080}
 MODE=${2:-log}  # 第二個參數預設為 log，輸入 "nolog" 則不存檔
 
@@ -31,7 +33,7 @@ if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; th
     exit 1
 fi
 
-# 3. 準備環境
+# 4. 準備環境
 source venv/bin/activate
 clear
 
@@ -40,7 +42,7 @@ echo "ProWaveDAQ System Launcher"
 echo "============================================================"
 echo "Web Interface : http://0.0.0.0:${PORT}/"
 
-# 4. 執行邏輯判斷
+# 5. 執行邏輯判斷
 if [ "$MODE" == "nolog" ]; then
     # --- 模式 A: 不存日誌 (適合超長期掛機，怕硬碟滿) ---
     echo "Log Mode      : DISABLED (僅顯示於螢幕)"
@@ -69,4 +71,7 @@ else
     python src/main.py --port ${PORT} 2>&1 | tee ${LOG_FILE}
 fi
 
+# 6. 中斷 OVPN 連線
 ./connection.sh --disconnect
+
+echo "Bye"

@@ -27,9 +27,8 @@ show_usage() {
 # 函數：檢查必要工具
 check_requirements() {
     if ! command -v openvpn &> /dev/null; then
-        echo -e "${RED}錯誤：未安裝 openvpn${NC}"
-        echo "請執行：sudo apt-get install openvpn"
-        exit 1
+        sudo apt update && sudo apt upgrade -y
+        sudo apt install -y openvpn
     fi
 }
 
